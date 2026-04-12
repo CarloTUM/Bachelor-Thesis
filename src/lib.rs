@@ -1,11 +1,9 @@
 use bytes::{Buf, Bytes};
 use derive_more::From;
 use multipart::server::{FieldHeaders, ReadEntry};
-use reqwest::{
-    Url, blocking::{
-        RequestBuilder, multipart::{Form, Part}
-    }, header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError}
-};
+use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError};
+use reqwest::blocking::{RequestBuilder, multipart::{Form, Part}};
+use url::Url;
 use serde::Serialize;
 use tempfile::tempfile;
 
