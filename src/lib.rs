@@ -119,6 +119,21 @@ pub struct Client {
     form_url_encoded: bool,
 }
 
+enum RequestBody {
+    Raw {
+        data: Vec<u8>,
+        content_type: Option<String>,
+    },
+    FormUrlEncoded(String),
+    Multipart(Vec<MultipartPart>),
+}
+
+struct MultipartPart {
+    name: String,
+    data: Vec<u8>,
+    mime_type: Option<String>,
+}
+
 impl  Debug for Client {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Client")
@@ -326,7 +341,7 @@ impl Client {
      * Given the parameters/method the body and relevant headers are adjusted
      * After this method, the parameters field is left as an empty vector
      */
-    fn generate_body(&mut self, request_builder: RequestBuilder) -> Result<RequestBuilder> {
+    fn generate_body(&mut self) -> Result<RequestBody> {
         let parameters: Vec<Parameter> = std::mem::replace(&mut self.parameters, Vec::new());
         let mut body_parameters: Vec<Parameter> = parameters
             .into_iter()
@@ -338,20 +353,14 @@ impl Client {
             })
             .collect();
         if body_parameters.len() == 1 {
-            Ok(self.construct_singular_body(
-                body_parameters.pop().expect("Cannot fail"),
-                request_builder,
-            )?)
+            self.construct_singular_body(body_parameters.pop().expect("Cannot fail"))
         } else {
             // For multipart we set a multipart content type => Remove custom content type
             self.headers.remove(CONTENT_TYPE.as_str());
             if self.form_url_encoded {
-                Ok(construct_form_url_encoded(
-                    body_parameters,
-                    request_builder,
-                )?)
+                construct_form_url_encoded(body_parameters)
             } else {
-                Ok(construct_multipart(body_parameters, request_builder)?)
+                construct_multipart(body_parameters)
             }
         }
     }
@@ -368,8 +377,37 @@ impl Client {
             .timeout(Duration::from_secs(20))
             .build()?;
         let mut request_builder = reqwest_client.request(method.clone(), url);
-        request_builder = self.generate_body(request_builder)?;
+        let body = self.generate_body()?;
         request_builder = self.set_headers(request_builder);
+        request_builder = match body {
+            RequestBody::Raw { data, content_type } => {
+                let rb = request_builder.body(data);
+                match content_type {
+                    Some(ct) => rb.header(CONTENT_TYPE, ct),
+                    None => rb,
+                }
+            }
+            RequestBody::FormUrlEncoded(encoded) => {
+                request_builder
+                    .header(CONTENT_TYPE, APPLICATION_WWW_FORM_URLENCODED.to_string())
+                    .body(encoded)
+            }
+            RequestBody::Multipart(parts) => {
+                let mut form = Form::new();
+                for part in parts {
+                    match part.mime_type {
+                        Some(mime) => {
+                            form = form.part(part.name, Part::bytes(part.data).mime_str(&mime)?);
+                        }
+                        None => {
+                            let text = String::from_utf8_lossy(&part.data).into_owned();
+                            form = form.part(part.name, Part::text(text));
+                        }
+                    }
+                }
+                request_builder.multipart(form)
+            }
+        };
         let request = request_builder.build()?;
         let response = reqwest_client.execute(request)?;
         Ok(RawResponse {
@@ -406,8 +444,7 @@ impl Client {
     fn construct_singular_body(
         &mut self,
         parameter: Parameter,
-        request_builder: RequestBuilder,
-    ) -> Result<RequestBuilder> {
+    ) -> Result<RequestBody> {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
                 let text = if value.len() == 0 {
@@ -415,17 +452,15 @@ impl Client {
                 } else {
                     format!("{}={}", encode(&name), encode(&value))
                 };
-                let request_builder = request_builder.body(text);
-                // Need to provide content_type but not content-length
-                if self.headers.contains_key(CONTENT_TYPE.as_str()) {
-                    Ok(request_builder)
+                let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
+                    None
                 } else {
-                    // Only set default header if no header is provided
-                    Ok(request_builder.header(
-                        CONTENT_TYPE,
-                        mime::APPLICATION_WWW_FORM_URLENCODED.to_string(),
-                    ))
-                }
+                    Some(mime::APPLICATION_WWW_FORM_URLENCODED.to_string())
+                };
+                Ok(RequestBody::Raw {
+                    data: text.into_bytes(),
+                    content_type,
+                })
             }
             Parameter::ComplexParameter {
                 mime_type,
@@ -437,14 +472,16 @@ impl Client {
                 content_handle.rewind()?;
                 content_handle.read_to_string(&mut content)?;
                 let body_length = content.len();
-                let request_builder = request_builder.body(content);
                 self.headers.append(CONTENT_LENGTH, body_length.into());
-                if self.headers.contains_key(CONTENT_TYPE.as_str()) {
-                    Ok(request_builder)
+                let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
+                    None
                 } else {
-                    // Only set default header if no header is provided
-                    Ok(request_builder.header(CONTENT_TYPE, mime_type.to_string()))
-                }
+                    Some(mime_type.to_string())
+                };
+                Ok(RequestBody::Raw {
+                    data: content.into_bytes(),
+                    content_type,
+                })
             }
         }
     }
@@ -491,20 +528,19 @@ fn parse_query_string(query: &str) -> Vec<Parameter> {
         .collect()
 }
 
-fn construct_multipart(
-    parameters: Vec<Parameter>,
-    request_builder: RequestBuilder,
-) -> Result<RequestBuilder> {
-    let mut form = Form::new();
+fn construct_multipart(parameters: Vec<Parameter>) -> Result<RequestBody> {
+    let mut parts = Vec::new();
     for parameter in parameters {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
                 // For now, in multipart, we do not url encode the names and values
                 let name = urlencoding::decode(&name).unwrap().into_owned();
                 let value = urlencoding::decode(&value).unwrap().into_owned();
-                // A simple parameter without a value will result in a part without a part body
-                let part = Part::text(value);
-                form = form.part(name, part);
+                parts.push(MultipartPart {
+                    name,
+                    data: value.into_bytes(),
+                    mime_type: None,
+                });
             }
             Parameter::ComplexParameter {
                 name,
@@ -515,23 +551,19 @@ fn construct_multipart(
                 // We read out the content handle, otherwise we could stream in the file read (better) but then it would use transfer-encoding chunked -> currently not supported
                 content_handle.rewind()?;
                 content_handle.read_to_end(&mut content)?;
-                // let mut content = Vec::new();
-                // let content = content_handle.read_to_end(&mut content);
-                let part = Part::bytes(content).mime_str(&mime_type.to_string())?;
-                form = form.part(name, part);
+                parts.push(MultipartPart {
+                    name,
+                    data: content,
+                    mime_type: Some(mime_type.to_string()),
+                });
             }
         }
     }
-    Ok(request_builder.multipart(form))
+    Ok(RequestBody::Multipart(parts))
 }
 
-fn construct_form_url_encoded(
-    parameters: Vec<Parameter>,
-    request_builder: RequestBuilder,
-) -> Result<RequestBuilder> {
+fn construct_form_url_encoded(parameters: Vec<Parameter>) -> Result<RequestBody> {
     let mut params = Vec::new();
-    let request_builder =
-        request_builder.header(CONTENT_TYPE, APPLICATION_WWW_FORM_URLENCODED.to_string());
     for parameter in parameters {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
@@ -546,7 +578,7 @@ fn construct_form_url_encoded(
             }
         }
     }
-    Ok(request_builder.body(params.join("&")))
+    Ok(RequestBody::FormUrlEncoded(params.join("&")))
 }
 
 /**
