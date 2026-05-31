@@ -113,7 +113,6 @@ pub struct ParsedResponse {
  */
 pub struct Client {
     method: Method,
-    reqwest_client: reqwest::blocking::Client,
     base_url: Url,
     pub headers: HeaderMap,
     parameters: Vec<Parameter>,
@@ -157,13 +156,9 @@ type Result<T> = std::result::Result<T, Error>;
  */
 impl Client {
     pub fn new(url: &str, method: Method) -> Result<Client> {
-        let mut client = reqwest::blocking::Client::builder();
-        client = client.timeout(Duration::from_secs(20));
-        let client = client.build().unwrap();
         let (base_url, parameters) = generate_base_url(url)?;
         let mut client = Client {
             method,
-            reqwest_client: client,
             base_url,
             headers: HeaderMap::new(),
             // All simple parameters are URL encoded -> If added through add_parameters
@@ -369,11 +364,14 @@ impl Client {
         // For now: Explicitly passing simple parameters of desired type self.mark_query_parameters();
         let url = self.generate_url();
         let method: reqwest::Method = self.method.clone().into();
-        let mut request_builder = self.reqwest_client.request(method.clone(), url);
+        let reqwest_client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()?;
+        let mut request_builder = reqwest_client.request(method.clone(), url);
         request_builder = self.generate_body(request_builder)?;
         request_builder = self.set_headers(request_builder);
         let request = request_builder.build()?;
-        let response = self.reqwest_client.execute(request)?;
+        let response = reqwest_client.execute(request)?;
         Ok(RawResponse {
             headers: response.headers().clone(),
             status_code: response.status().as_u16(),
@@ -771,8 +769,8 @@ mod testing {
                 value: "simple_value".to_owned(),
                 param_type: ParameterType::Body,
             });
-            let mut request_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let mut request_builder = reqwest_client
                 .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
             request_builder = client.generate_body(request_builder)?;
             let request = request_builder.build()?;
@@ -785,7 +783,7 @@ mod testing {
                     .unwrap(),
                 APPLICATION_WWW_FORM_URLENCODED.to_string()
             );
-            let response = client.reqwest_client.execute(request)?;
+            let response = reqwest_client.execute(request)?;
             assert_eq!(response.status().as_u16(), 200);
             println!("{:?}", response.text().unwrap());
             Ok(())
@@ -807,8 +805,8 @@ mod testing {
                 mime_type: mime::TEXT_XML,
                 content_handle: file,
             });
-            let mut request_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let mut request_builder = reqwest_client
                 .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
             request_builder = client.generate_body(request_builder)?;
             let request = request_builder.build()?;
@@ -821,7 +819,7 @@ mod testing {
                     .unwrap(),
                 "text/xml"
             );
-            let response = client.reqwest_client.execute(request)?;
+            let response = reqwest_client.execute(request)?;
             assert_eq!(response.status().as_u16(), 200);
 
             Ok(())
@@ -843,13 +841,13 @@ mod testing {
                 mime_type: mime::IMAGE_JPEG,
                 content_handle: file,
             });
-            let mut request_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let mut request_builder = reqwest_client
                 .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
             request_builder = client.generate_body(request_builder)?;
             let request = request_builder.build()?;
 
-            let response = client.reqwest_client.execute(request)?;
+            let response = reqwest_client.execute(request)?;
             println!("{:?}", response);
             assert_eq!(response.status().as_u16(), 200);
 
@@ -881,12 +879,12 @@ mod testing {
                 value: "simple_value2".to_owned(),
                 param_type: ParameterType::Body,
             });
-            let mut request_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let mut request_builder = reqwest_client
                 .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
             request_builder = client.generate_body(request_builder)?;
             let request = request_builder.build()?;
-            let response = client.reqwest_client.execute(request)?;
+            let response = reqwest_client.execute(request)?;
             assert_eq!(response.status().as_u16(), 200);
             println!("{:?}", response.text().unwrap());
             Ok(())
@@ -923,12 +921,12 @@ mod testing {
                 param_type: ParameterType::Body,
             });
 
-            let mut request_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let mut request_builder = reqwest_client
                 .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
             request_builder = client.generate_body(request_builder)?;
             let request = request_builder.build()?;
-            let response = client.reqwest_client.execute(request)?;
+            let response = reqwest_client.execute(request)?;
             assert_eq!(response.status().as_u16(), 200);
             println!("{:?}", response.text().unwrap());
             Ok(())
@@ -1107,8 +1105,8 @@ mod testing {
                     param_type: ParameterType::Body,
                 },
             ]);
-            let req_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let req_builder = reqwest_client
                 .request(Method::GET, "http://test.org".parse::<Url>().unwrap());
             let req = client.generate_body(req_builder).unwrap().build().unwrap();
             assert_eq!(
@@ -1137,8 +1135,8 @@ mod testing {
                     content_handle: tempfile::tempfile().unwrap(),
                 },
             ]);
-            let req_builder = client
-                .reqwest_client
+            let reqwest_client = reqwest::blocking::Client::new();
+            let req_builder = reqwest_client
                 .request(Method::GET, "http://test.org".parse::<Url>().unwrap());
             let req = client.generate_body(req_builder).unwrap().build().unwrap();
             // Compare without boundary
