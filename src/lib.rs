@@ -1,4 +1,5 @@
 use bytes::{Buf, Bytes};
+use curl::easy::{Easy, List};
 use derive_more::From;
 use multipart::server::{FieldHeaders, ReadEntry};
 use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError};
@@ -147,7 +148,7 @@ impl  Debug for Client {
 
 #[derive(From, Debug)]
 pub enum Error {
-    ReqwestGeneralError(reqwest::Error),
+    CurlError(curl::Error),
     ReqwestInvalidHeaderName(reqwest::header::InvalidHeaderName),
     ReqwestInvalidHeaderValue(reqwest::header::InvalidHeaderValue),
     UrlParserError(url::ParseError),
@@ -370,50 +371,77 @@ impl Client {
      * Requires the target to send headers that only contain visible ascii
      */
     pub fn execute_raw(mut self) -> Result<RawResponse> {
-        // For now: Explicitly passing simple parameters of desired type self.mark_query_parameters();
         let url = self.generate_url();
-        let method: reqwest::Method = self.method.clone().into();
-        let reqwest_client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()?;
-        let mut request_builder = reqwest_client.request(method.clone(), url);
+
+        let mut easy = Easy::new();
+        easy.url(url.as_str())?;
+        easy.timeout(Duration::from_secs(20))?;
+        easy.custom_request(match self.method {
+            Method::GET => "GET",
+            Method::POST => "POST",
+            Method::PUT => "PUT",
+            Method::HEAD => "HEAD",
+            Method::DELETE => "DELETE",
+            Method::PATCH => "PATCH",
+        })?;
+        if matches!(self.method, Method::HEAD) {
+            easy.nobody(true)?;
+        }
+
         let body = self.generate_body()?;
-        request_builder = self.set_headers(request_builder);
-        request_builder = match body {
+        match body {
             RequestBody::Raw { data, content_type } => {
-                let rb = request_builder.body(data);
-                match content_type {
-                    Some(ct) => rb.header(CONTENT_TYPE, ct),
-                    None => rb,
+                if let Some(ct) = content_type {
+                    self.headers.insert(CONTENT_TYPE, HeaderValue::from_str(&ct)?);
+                }
+                if !data.is_empty() {
+                    easy.post_fields_copy(&data)?;
                 }
             }
             RequestBody::FormUrlEncoded(encoded) => {
-                request_builder
-                    .header(CONTENT_TYPE, APPLICATION_WWW_FORM_URLENCODED.to_string())
-                    .body(encoded)
+                self.headers.insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_static("application/x-www-form-urlencoded"),
+                );
+                easy.post_fields_copy(encoded.as_bytes())?;
             }
-            RequestBody::Multipart(parts) => {
-                let mut form = Form::new();
-                for part in parts {
-                    match part.mime_type {
-                        Some(mime) => {
-                            form = form.part(part.name, Part::bytes(part.data).mime_str(&mime)?);
-                        }
-                        None => {
-                            let text = String::from_utf8_lossy(&part.data).into_owned();
-                            form = form.part(part.name, Part::text(text));
+            RequestBody::Multipart(_) => unimplemented!("multipart kommt später"),
+        }
+
+        let mut header_list = List::new();
+        for (name, value) in self.headers.iter() {
+            header_list.append(&format!("{}: {}", name.as_str(), value.to_str()?))?;
+        }
+        easy.http_headers(header_list)?;
+
+        let mut response_body: Vec<u8> = Vec::new();
+        let mut response_headers = HeaderMap::new();
+        {
+            let mut transfer = easy.transfer();
+            transfer.write_function(|data| {
+                response_body.extend_from_slice(data);
+                Ok(data.len())
+            })?;
+            transfer.header_function(|line| {
+                if let Ok(s) = std::str::from_utf8(line) {
+                    if let Some((name, value)) = s.trim_end().split_once(':') {
+                        if let (Ok(n), Ok(v)) = (
+                            HeaderName::from_str(name.trim()),
+                            HeaderValue::from_str(value.trim()),
+                        ) {
+                            response_headers.insert(n, v);
                         }
                     }
                 }
-                request_builder.multipart(form)
-            }
-        };
-        let request = request_builder.build()?;
-        let response = reqwest_client.execute(request)?;
+                true
+            })?;
+            transfer.perform()?;
+        }
+
         Ok(RawResponse {
-            headers: response.headers().clone(),
-            status_code: response.status().as_u16(),
-            body: response.bytes()?,
+            headers: response_headers,
+            status_code: easy.response_code()? as u16,
+            body: bytes::Bytes::from(response_body),
         })
     }
 
