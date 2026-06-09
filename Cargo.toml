@@ -9,7 +9,7 @@ path = "./src/lib.rs"
 
 [dependencies]
 serde ={ version = "1.0.217", features = ["derive"]}
-multipart = {version = "0.18.0", default-features= false, features = ["server"]}
+multipart = {package = "multipart_ng", version = "0.18.0", default-features= false, features = ["server"]}
 tempfile = "3.15.0"
 mime = "0.3.17"
 url = "2.5.4"
