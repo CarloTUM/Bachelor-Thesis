@@ -1,9 +1,8 @@
 use bytes::{Buf, Bytes};
-use curl::easy::{Easy, List};
+use curl::easy::{Easy, Form, List};
 use derive_more::From;
 use multipart::server::{FieldHeaders, ReadEntry};
-use http::header::{CONTENT_LENGTH, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError};
-use reqwest::blocking::{RequestBuilder, multipart::{Form, Part}};
+use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError};
 use url::Url;
 use serde::Serialize;
 use tempfile::tempfile;
@@ -149,8 +148,9 @@ impl  Debug for Client {
 #[derive(From, Debug)]
 pub enum Error {
     CurlError(curl::Error),
-    ReqwestInvalidHeaderName(reqwest::header::InvalidHeaderName),
-    ReqwestInvalidHeaderValue(reqwest::header::InvalidHeaderValue),
+    CurlFormError(curl::FormError),
+    InvalidHeaderName(http::header::InvalidHeaderName),
+    InvalidHeaderValue(http::header::InvalidHeaderValue),
     UrlParserError(url::ParseError),
     FileError(std::io::Error),
     ToStringError(ToStrError),
@@ -405,7 +405,18 @@ impl Client {
                 );
                 easy.post_fields_copy(encoded.as_bytes())?;
             }
-            RequestBody::Multipart(_) => unimplemented!("multipart kommt später"),
+            RequestBody::Multipart(parts) => {
+                let mut form = Form::new();
+                for part in &parts {
+                    let mut p = form.part(&part.name);
+                    p.contents(&part.data);
+                    if let Some(mime) = &part.mime_type {
+                        p.content_type(mime);
+                    }
+                    p.add()?;
+                }
+                easy.httppost(form)?;
+            }
         }
 
         let mut header_list = List::new();
@@ -429,7 +440,7 @@ impl Client {
                             HeaderName::from_str(name.trim()),
                             HeaderValue::from_str(value.trim()),
                         ) {
-                            response_headers.insert(n, v);
+                            response_headers.append(n, v);
                         }
                     }
                 }
@@ -452,15 +463,6 @@ impl Client {
         let raw = self.execute_raw()?;
 
         raw.parse_response()
-    }
-
-    /**
-     *  Sets the headers of the request_builder.
-     *  After this method the headers field is left as an empty map
-     */
-    fn set_headers(&mut self, request_builder: RequestBuilder) -> RequestBuilder {
-        let headers: HeaderMap = std::mem::replace(&mut self.headers, HeaderMap::new());
-        request_builder.headers(headers)
     }
 
     /**
@@ -499,8 +501,6 @@ impl Client {
                 // We read out the content handle, otherwise we could stream in the file read (better) but then it would use transfer-encoding chunked -> currently not supported
                 content_handle.rewind()?;
                 content_handle.read_to_string(&mut content)?;
-                let body_length = content.len();
-                self.headers.append(CONTENT_LENGTH, body_length.into());
                 let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
                     None
                 } else {
@@ -743,19 +743,6 @@ pub enum Method {
     PATCH,
 }
 
-impl Into<reqwest::Method> for Method {
-    fn into(self) -> reqwest::Method {
-        match self {
-            Method::GET => reqwest::Method::GET,
-            Method::PUT => reqwest::Method::PUT,
-            Method::POST => reqwest::Method::POST,
-            Method::HEAD => reqwest::Method::HEAD,
-            Method::DELETE => reqwest::Method::DELETE,
-            Method::PATCH => reqwest::Method::PATCH,
-        }
-    }
-}
-
 #[cfg(test)]
 mod testing {
     use super::*;
@@ -816,10 +803,6 @@ mod testing {
             Ok(())
         }
 
-        // requires netcat to run on localhost 5678
-        // tested by looking at the generated requests by netcat
-        // Results can be found in the test_files/http/request/simple_singular_request.txt
-        // For now is only used to generate bodies and manual inspection
         #[test]
         fn test_building_singular_simple_body() -> Result<()> {
             let test_url = "http://localhost:5678";
@@ -829,30 +812,19 @@ mod testing {
                 value: "simple_value".to_owned(),
                 param_type: ParameterType::Body,
             });
-            let reqwest_client = reqwest::blocking::Client::new();
-            let mut request_builder = reqwest_client
-                .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
-            request_builder = client.generate_body(request_builder)?;
-            let request = request_builder.build()?;
-            assert_eq!(
-                request
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                APPLICATION_WWW_FORM_URLENCODED.to_string()
-            );
-            let response = reqwest_client.execute(request)?;
-            assert_eq!(response.status().as_u16(), 200);
-            println!("{:?}", response.text().unwrap());
+            match client.generate_body()? {
+                RequestBody::Raw { data, content_type } => {
+                    assert_eq!(
+                        content_type.as_deref(),
+                        Some(APPLICATION_WWW_FORM_URLENCODED.as_ref())
+                    );
+                    assert_eq!(data, b"simple_param_%20test=simple_value");
+                }
+                _ => panic!("expected RequestBody::Raw"),
+            }
             Ok(())
         }
 
-        // requires netcat to run on localhost 5678
-        // tested by looking at the generated requests by netcat
-        // Results can be found in the test_files/http/request/text_file_singular_request.txt
-        // For now is only used to generate bodies and manual inspection
         #[test]
         fn test_building_singular_complex_text_body() -> Result<()> {
             let test_url = "http://localhost:5678";
@@ -865,30 +837,15 @@ mod testing {
                 mime_type: mime::TEXT_XML,
                 content_handle: file,
             });
-            let reqwest_client = reqwest::blocking::Client::new();
-            let mut request_builder = reqwest_client
-                .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
-            request_builder = client.generate_body(request_builder)?;
-            let request = request_builder.build()?;
-            assert_eq!(
-                request
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .unwrap()
-                    .to_str()
-                    .unwrap(),
-                "text/xml"
-            );
-            let response = reqwest_client.execute(request)?;
-            assert_eq!(response.status().as_u16(), 200);
-
+            match client.generate_body()? {
+                RequestBody::Raw { content_type, .. } => {
+                    assert_eq!(content_type.as_deref(), Some("text/xml"));
+                }
+                _ => panic!("expected RequestBody::Raw"),
+            }
             Ok(())
         }
 
-        // requires netcat to run on localhost 5678
-        // tested by looking at the generated requests by netcat
-        // Results can be found in the test_files/http/request/jpg_file_singular_request.txt
-        // For now is only used to generate bodies and manual inspection
         #[test]
         fn test_building_singular_complex_binary_body() -> Result<()> {
             let test_url = "http://localhost:5678";
@@ -901,25 +858,15 @@ mod testing {
                 mime_type: mime::IMAGE_JPEG,
                 content_handle: file,
             });
-            let reqwest_client = reqwest::blocking::Client::new();
-            let mut request_builder = reqwest_client
-                .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
-            request_builder = client.generate_body(request_builder)?;
-            let request = request_builder.build()?;
-
-            let response = reqwest_client.execute(request)?;
-            println!("{:?}", response);
-            assert_eq!(response.status().as_u16(), 200);
-
-            let body = response.bytes()?;
-            let _ = fs::write("./output/output.jpg", body);
+            match client.generate_body()? {
+                RequestBody::Raw { content_type, .. } => {
+                    assert_eq!(content_type.as_deref(), Some("image/jpeg"));
+                }
+                _ => panic!("expected RequestBody::Raw"),
+            }
             Ok(())
         }
 
-        // requires netcat to run on localhost 5678
-        // tested by looking at the generated requests by netcat
-        // Results can be found in the test_files/http/request/text_multipart_request.txt
-        // For now is only used to generate bodies and manual inspection
         #[test]
         fn test_building_text_multipart() -> Result<()> {
             let test_url = "http://localhost:5678";
@@ -939,21 +886,18 @@ mod testing {
                 value: "simple_value2".to_owned(),
                 param_type: ParameterType::Body,
             });
-            let reqwest_client = reqwest::blocking::Client::new();
-            let mut request_builder = reqwest_client
-                .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
-            request_builder = client.generate_body(request_builder)?;
-            let request = request_builder.build()?;
-            let response = reqwest_client.execute(request)?;
-            assert_eq!(response.status().as_u16(), 200);
-            println!("{:?}", response.text().unwrap());
+            match client.generate_body()? {
+                RequestBody::FormUrlEncoded(encoded) => {
+                    assert_eq!(
+                        encoded,
+                        "simple_param_0test=simple_value0&simple_param_1test=simple_value1&simple_param_2test=simple_value2"
+                    );
+                }
+                _ => panic!("expected RequestBody::FormUrlEncoded"),
+            }
             Ok(())
         }
 
-        // requires netcat to run on localhost 5678
-        // tested by looking at the generated requests by netcat
-        // Results can be found in the test_files/http/request/mixed_multipart_request.txt
-        // For now is only used to generate bodies and manual inspection
         #[test]
         fn test_building_mixed_multipart() -> Result<()> {
             let test_url = "http://localhost:5678";
@@ -981,21 +925,25 @@ mod testing {
                 param_type: ParameterType::Body,
             });
 
-            let reqwest_client = reqwest::blocking::Client::new();
-            let mut request_builder = reqwest_client
-                .request(Method::POST.into(), test_url.parse::<Url>().unwrap());
-            request_builder = client.generate_body(request_builder)?;
-            let request = request_builder.build()?;
-            let response = reqwest_client.execute(request)?;
-            assert_eq!(response.status().as_u16(), 200);
-            println!("{:?}", response.text().unwrap());
+            match client.generate_body()? {
+                RequestBody::Multipart(parts) => {
+                    assert_eq!(parts.len(), 3);
+                    assert_eq!(parts[0].name, "test_jpg");
+                    assert_eq!(parts[0].mime_type.as_deref(), Some("image/jpeg"));
+                    assert_eq!(parts[1].name, "test_xml");
+                    assert_eq!(parts[1].mime_type.as_deref(), Some("text/xml"));
+                    assert_eq!(parts[2].name, "test_simple");
+                    assert_eq!(parts[2].mime_type, None);
+                    assert_eq!(parts[2].data, b"test_value");
+                }
+                _ => panic!("expected RequestBody::Multipart"),
+            }
             Ok(())
         }
     }
 
     mod test_parsing {
         use mime::TEXT_PLAIN_UTF_8;
-        use reqwest::Method;
 
         use super::*;
 
@@ -1165,14 +1113,12 @@ mod testing {
                     param_type: ParameterType::Body,
                 },
             ]);
-            let reqwest_client = reqwest::blocking::Client::new();
-            let req_builder = reqwest_client
-                .request(Method::GET, "http://test.org".parse::<Url>().unwrap());
-            let req = client.generate_body(req_builder).unwrap().build().unwrap();
-            assert_eq!(
-                req.body().unwrap().as_bytes().unwrap(),
-                "a=b&c=d".as_bytes()
-            );
+            match client.generate_body().unwrap() {
+                RequestBody::FormUrlEncoded(encoded) => {
+                    assert_eq!(encoded, "a=b&c=d");
+                }
+                _ => panic!("expected RequestBody::FormUrlEncoded"),
+            }
         }
 
         #[test]
@@ -1195,22 +1141,12 @@ mod testing {
                     content_handle: tempfile::tempfile().unwrap(),
                 },
             ]);
-            let reqwest_client = reqwest::blocking::Client::new();
-            let req_builder = reqwest_client
-                .request(Method::GET, "http://test.org".parse::<Url>().unwrap());
-            let req = client.generate_body(req_builder).unwrap().build().unwrap();
-            // Compare without boundary
-            assert_eq!(
-                req.headers()
-                    .get(CONTENT_TYPE)
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .split_once(";")
-                    .unwrap()
-                    .0,
-                MULTIPART_FORM_DATA.to_string()
-            );
+            match client.generate_body().unwrap() {
+                RequestBody::Multipart(parts) => {
+                    assert_eq!(parts.len(), 3);
+                }
+                _ => panic!("expected RequestBody::Multipart"),
+            }
         }
 
         fn parse_headers_from_file(path: &str) -> Result<HeaderMap> {
