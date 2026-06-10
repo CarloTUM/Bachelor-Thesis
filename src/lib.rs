@@ -198,10 +198,6 @@ impl Client {
                 param_type,
             } => match param_type {
                 ParameterType::Query => {
-                    let name = name.strip_prefix("\"").unwrap_or(&name);
-                    let name = name.strip_suffix("\"").unwrap_or(name);
-                    let value = value.strip_prefix("\"").unwrap_or(&value);
-                    let value = value.strip_suffix("\"").unwrap_or(value);
                     Parameter::SimpleParameter {
                         name: name.to_owned(),
                         value: value.to_owned(),
@@ -209,10 +205,6 @@ impl Client {
                     }
                 }
                 ParameterType::Body => {
-                    let name = name.strip_prefix("\"").unwrap_or(&name);
-                    let name = name.strip_suffix("\"").unwrap_or(name);
-                    let value = value.strip_prefix("\"").unwrap_or(&value);
-                    let value = value.strip_suffix("\"").unwrap_or(value);
                     Parameter::SimpleParameter {
                         name: name.to_owned(),
                         value: value.to_owned(),
@@ -497,17 +489,17 @@ impl Client {
                 mut content_handle,
                 ..
             } => {
-                let mut content = String::new();
                 // We read out the content handle, otherwise we could stream in the file read (better) but then it would use transfer-encoding chunked -> currently not supported
+                let mut content = Vec::new();
                 content_handle.rewind()?;
-                content_handle.read_to_string(&mut content)?;
+                content_handle.read_to_end(&mut content)?;
                 let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
                     None
                 } else {
                     Some(mime_type.to_string())
                 };
                 Ok(RequestBody::Raw {
-                    data: content.into_bytes(),
+                    data: content,
                     content_type,
                 })
             }
