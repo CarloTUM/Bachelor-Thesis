@@ -419,6 +419,7 @@ impl Client {
 
         let mut response_body: Vec<u8> = Vec::new();
         let mut response_headers = HeaderMap::new();
+        let mut header_err: Option<Error> = None;
         {
             let mut transfer = easy.transfer();
             transfer.write_function(|data| {
@@ -426,19 +427,17 @@ impl Client {
                 Ok(data.len())
             })?;
             transfer.header_function(|line| {
-                if let Ok(s) = std::str::from_utf8(line) {
-                    if let Some((name, value)) = s.trim_end().split_once(':') {
-                        if let (Ok(n), Ok(v)) = (
-                            HeaderName::from_str(name.trim()),
-                            HeaderValue::from_str(value.trim()),
-                        ) {
-                            response_headers.append(n, v);
-                        }
+                if header_err.is_none() {
+                    if let Err(e) = process_header_line(line, &mut response_headers) {
+                        header_err = Some(e);
                     }
                 }
                 true
             })?;
             transfer.perform()?;
+        }
+        if let Some(e) = header_err {
+            return Err(e);
         }
 
         Ok(RawResponse {
@@ -601,6 +600,32 @@ fn construct_form_url_encoded(parameters: Vec<Parameter>) -> Result<RequestBody>
     Ok(RequestBody::FormUrlEncoded(params.join("&")))
 }
 
+/// Processes a single header line from libcurl's header callback.
+/// Clears the HeaderMap when a new "HTTP/" status line arrives so headers from
+/// earlier phases (e.g. "100 Continue") do not bleed into the final response.
+/// Returns Err for non-UTF8 lines or header names/values that are not valid
+/// per http::header — stricter than reqwest, which surfaced this lazily at
+/// to_str(). Unobservable under the visible-ASCII precondition.
+fn process_header_line(line: &[u8], headers: &mut HeaderMap) -> Result<()> {
+    let s = std::str::from_utf8(line)
+        .map_err(|_| Error::HeaderParseError("non-utf8 header line".to_owned()))?;
+    let trimmed = s.trim_end_matches(['\r', '\n']);
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    if trimmed.starts_with("HTTP/") {
+        headers.clear();
+        return Ok(());
+    }
+    let Some((name, value)) = trimmed.split_once(':') else {
+        return Ok(());
+    };
+    let n = HeaderName::from_str(name.trim())?;
+    let v = HeaderValue::from_str(value.trim())?;
+    headers.append(n, v);
+    Ok(())
+}
+
 /**
  * Will be lossy if a header has multiple values.
  */
@@ -747,6 +772,26 @@ mod testing {
         assert_eq!(parsed_mime.essence_str(), "text/plain");
         assert_eq!(parsed_mime.get_param("charset").unwrap(), "UTF-8");
         assert_eq!(parsed_mime, test_type)
+    }
+
+    #[test]
+    fn test_header_callback_clears_on_new_phase() {
+        let mut h = HeaderMap::new();
+        process_header_line(b"HTTP/1.1 100 Continue\r\n", &mut h).unwrap();
+        process_header_line(b"Link: </preload>; rel=preload\r\n", &mut h).unwrap();
+        process_header_line(b"\r\n", &mut h).unwrap();
+        process_header_line(b"HTTP/1.1 200 OK\r\n", &mut h).unwrap();
+        process_header_line(b"Content-Type: text/plain\r\n", &mut h).unwrap();
+        process_header_line(b"X-Trace: abc\r\n", &mut h).unwrap();
+        assert!(h.get("link").is_none(), "100-phase header must not leak");
+        assert_eq!(h.get("content-type").unwrap(), "text/plain");
+        assert_eq!(h.get("x-trace").unwrap(), "abc");
+    }
+
+    #[test]
+    fn test_header_callback_rejects_non_ascii() {
+        let mut h = HeaderMap::new();
+        assert!(process_header_line(b"X-Bad: \xff\xfe\r\n", &mut h).is_err());
     }
 
     mod test_creation {
