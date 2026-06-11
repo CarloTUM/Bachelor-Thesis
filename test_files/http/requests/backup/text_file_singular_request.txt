@@ -1,0 +1,13 @@
+POST / HTTP/1.1
+content-type: application/json
+content-length: 214
+accept: */*
+host: localhost:5678
+
+<menu id="file" value="File">
+  <popup>
+    <menuitem value="New" onclick="CreateNewDoc()" />
+    <menuitem value="Open" onclick="OpenDoc()" />
+    <menuitem value="Close" onclick="CloseDoc()" />
+  </popup>
+</menu>
