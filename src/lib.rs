@@ -369,6 +369,7 @@ impl Client {
         easy.url(url.as_str())?;
         easy.timeout(Duration::from_secs(20))?;
         easy.follow_location(true)?;
+        easy.max_redirections(10)?;
         easy.custom_request(match self.method {
             Method::GET => "GET",
             Method::POST => "POST",
