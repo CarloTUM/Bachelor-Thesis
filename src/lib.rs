@@ -362,10 +362,13 @@ impl Client {
      * Will execute the request and return the RawResponse
      * Requires the target to send headers that only contain visible ascii
      */
-    pub fn execute_raw(mut self) -> Result<RawResponse> {
-        let url = self.generate_url();
-
+    pub fn execute_raw(self) -> Result<RawResponse> {
         let mut easy = Easy::new();
+        self.execute_on(&mut easy)
+    }
+
+    fn execute_on(mut self, easy: &mut Easy) -> Result<RawResponse> {
+        let url = self.generate_url();
         easy.url(url.as_str())?;
         easy.timeout(Duration::from_secs(20))?;
         easy.follow_location(true)?;
@@ -505,6 +508,38 @@ impl Client {
                 })
             }
         }
+    }
+}
+
+/// Keeps one curl Easy handle around and reuses it, so we don't redo the
+/// TCP/TLS handshake on every call to the same host. Each request reset()s
+/// the handle to drop the old options but keep the live connection.
+pub struct Agent {
+    easy: Easy,
+}
+
+impl Agent {
+    pub fn new() -> Agent {
+        Agent { easy: Easy::new() }
+    }
+
+    pub fn execute_raw(&mut self, client: Client) -> Result<RawResponse> {
+        self.easy.reset();
+        client.execute_on(&mut self.easy)
+    }
+
+    pub fn execute(&mut self, client: Client) -> Result<ParsedResponse> {
+        self.execute_raw(client)?.parse_response()
+    }
+
+    pub fn local_port(&mut self) -> Result<u16> {
+        Ok(self.easy.local_port()?)
+    }
+}
+
+impl Default for Agent {
+    fn default() -> Self {
+        Agent::new()
     }
 }
 
