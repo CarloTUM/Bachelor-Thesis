@@ -81,15 +81,6 @@ impl Into<ParameterDTO> for Parameter {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum HttpVerb {
-    GET,
-    PUT,
-    POST,
-    DELETE,
-    PATCH,
-}
-
 enum Headers {
     HeaderMap(HeaderMap),
     PartHeaders(FieldHeaders),
