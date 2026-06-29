@@ -156,7 +156,7 @@ type Result<T> = std::result::Result<T, Error>;
 ///  - ComplexParameters for files (content-type of header/part-header is mime-type)
 ///  - If multiple parameters are provided, then a multipart (including complex params) or form url encoded (only simple params) request is send
 ///  - If the query string contains query parameters they are parsed into SimpleParameters (with ParameterType Query)
-///  - SimpleParameter name and value are URL encoded and Quotation marks are stripped from start and end (not for complex parameters)
+///  - SimpleParameter name and value are URL encoded
 impl Client {
     pub fn new(url: &str, method: Method) -> Result<Client> {
         let (base_url, parameters) = generate_base_url(url)?;
@@ -174,7 +174,6 @@ impl Client {
     }
 
     /// Will add the parameter to the client parameters for the request
-    /// Removes Quotation marks
     pub fn add_parameter(&mut self, mut parameter: Parameter) {
         parameter = match parameter {
             Parameter::SimpleParameter {
@@ -214,8 +213,8 @@ impl Client {
         self.parameters.push(parameter);
     }
 
-    /// Will add the parameter to the client parameters for the request
-    /// If the parameter is a simple parameter, it will be URL encoded
+    /// Will add a complex (file-backed) parameter to the client parameters for the request
+    /// The provided bytes are written to a temporary file used as the content handle
     pub fn add_complex_parameter(
         &mut self,
         name: &str,
@@ -247,8 +246,6 @@ impl Client {
     /// Inserts the header and replace the previous value. Currently not supporting multi valued headers
     /// If header parameters are desired, provide them as part of the value (delimited by the ;)
     ///
-    /// Returns Some(value) of the previous header with the same name if one was present, otherwise None
-    ///
     /// Only visible ASCII characters (32-127) are permitted. Use
     /// `from_bytes` to create a `HeaderValue` that includes opaque octets
     /// (128-255).
@@ -262,8 +259,6 @@ impl Client {
     /// Inserts the header and replace the previous value. Currently not supporting multi valued headers
     /// If header parameters are desired, provide them as part of the value (delimited by the ;)
     ///
-    /// Returns Some(value) of the previous header with the same name if one was present, otherwise None
-    ///
     /// Only visible ASCII characters (32-127) are permitted. Use
     /// `from_bytes` to create a `HeaderValue` that includes opaque octets
     /// (128-255).
@@ -275,7 +270,7 @@ impl Client {
     }
 
     /// Generates the complete request URL including the query parameters.
-    /// Query parameters are constructed from the SimpleParameters with ParameterType Body
+    /// Query parameters are constructed from the SimpleParameters with ParameterType Query
     fn generate_url(&self) -> Url {
         let mut query_params = Vec::new();
         self.parameters
