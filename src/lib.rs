@@ -99,9 +99,7 @@ pub struct ParsedResponse {
     pub raw: Bytes,
 }
 
-/**
- * Abstraction on top of libcurl
- */
+/// Abstraction on top of libcurl
 pub struct Client {
     method: Method,
     base_url: Url,
@@ -152,15 +150,13 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-/**
- * Executes HTTP requests:
- *
- *  - SimpleParameters for query parameters and application/x-www-form-urlencoded
- *  - ComplexParameters for files (content-type of header/part-header is mime-type)
- *  - If multiple parameters are provided, then a multipart (including complex params) or form url encoded (only simple params) request is send
- *  - If the query string contains query parameters they are parsed into SimpleParameters (with ParameterType Query)
- *  - SimpleParameter name and value are URL encoded and Quotation marks are stripped from start and end (not for complex parameters)
- */
+/// Executes HTTP requests:
+///
+///  - SimpleParameters for query parameters and application/x-www-form-urlencoded
+///  - ComplexParameters for files (content-type of header/part-header is mime-type)
+///  - If multiple parameters are provided, then a multipart (including complex params) or form url encoded (only simple params) request is send
+///  - If the query string contains query parameters they are parsed into SimpleParameters (with ParameterType Query)
+///  - SimpleParameter name and value are URL encoded and Quotation marks are stripped from start and end (not for complex parameters)
 impl Client {
     pub fn new(url: &str, method: Method) -> Result<Client> {
         let (base_url, parameters) = generate_base_url(url)?;
@@ -177,10 +173,8 @@ impl Client {
         Ok(client)
     }
 
-    /**
-     * Will add the parameter to the client parameters for the request
-     * Removes Quotation marks
-     */
+    /// Will add the parameter to the client parameters for the request
+    /// Removes Quotation marks
     pub fn add_parameter(&mut self, mut parameter: Parameter) {
         parameter = match parameter {
             Parameter::SimpleParameter {
@@ -220,10 +214,8 @@ impl Client {
         self.parameters.push(parameter);
     }
 
-    /**
-     * Will add the parameter to the client parameters for the request
-     * If the parameter is a simple parameter, it will be URL encoded
-     */
+    /// Will add the parameter to the client parameters for the request
+    /// If the parameter is a simple parameter, it will be URL encoded
     pub fn add_complex_parameter(
         &mut self,
         name: &str,
@@ -252,16 +244,14 @@ impl Client {
         self.headers = request_headers;
     }
 
-    /**
-     * Inserts the header and replace the previous value. Currently not supporting multi valued headers
-     * If header parameters are desired, provide them as part of the value (delimited by the ;)
-     *
-     * Returns Some(value) of the previous header with the same name if one was present, otherwise None
-     *
-     * Only visible ASCII characters (32-127) are permitted. Use
-     * `from_bytes` to create a `HeaderValue` that includes opaque octets
-     * (128-255).
-     */
+    /// Inserts the header and replace the previous value. Currently not supporting multi valued headers
+    /// If header parameters are desired, provide them as part of the value (delimited by the ;)
+    ///
+    /// Returns Some(value) of the previous header with the same name if one was present, otherwise None
+    ///
+    /// Only visible ASCII characters (32-127) are permitted. Use
+    /// `from_bytes` to create a `HeaderValue` that includes opaque octets
+    /// (128-255).
     pub fn add_request_header(&mut self, name: &str, value: &str) -> Result<()> {
         self.headers.remove(name);
         self.headers
@@ -269,16 +259,14 @@ impl Client {
         Ok(())
     }
 
-    /**
-     * Inserts the header and replace the previous value. Currently not supporting multi valued headers
-     * If header parameters are desired, provide them as part of the value (delimited by the ;)
-     *
-     * Returns Some(value) of the previous header with the same name if one was present, otherwise None
-     *
-     * Only visible ASCII characters (32-127) are permitted. Use
-     * `from_bytes` to create a `HeaderValue` that includes opaque octets
-     * (128-255).
-     */
+    /// Inserts the header and replace the previous value. Currently not supporting multi valued headers
+    /// If header parameters are desired, provide them as part of the value (delimited by the ;)
+    ///
+    /// Returns Some(value) of the previous header with the same name if one was present, otherwise None
+    ///
+    /// Only visible ASCII characters (32-127) are permitted. Use
+    /// `from_bytes` to create a `HeaderValue` that includes opaque octets
+    /// (128-255).
     pub fn add_request_headers(&mut self, headers: HashMap<String, String>) -> Result<()> {
         for (name, value) in headers.into_iter() {
             self.add_request_header(&name, &value)?;
@@ -286,10 +274,8 @@ impl Client {
         Ok(())
     }
 
-    /**
-     * Generates the complete request URL including the query parameters.
-     * Query parameters are constructed from the SimpleParameters with ParameterType Body
-     */
+    /// Generates the complete request URL including the query parameters.
+    /// Query parameters are constructed from the SimpleParameters with ParameterType Body
     fn generate_url(&self) -> Url {
         let mut query_params = Vec::new();
         self.parameters
@@ -321,10 +307,8 @@ impl Client {
         Url::parse(&url).expect("Cannot happen")
     }
 
-    /**
-     * Given the parameters/method the body and relevant headers are adjusted
-     * After this method, the parameters field is left as an empty vector
-     */
+    /// Given the parameters/method the body and relevant headers are adjusted
+    /// After this method, the parameters field is left as an empty vector
     fn generate_body(&mut self) -> Result<RequestBody> {
         let parameters: Vec<Parameter> = std::mem::replace(&mut self.parameters, Vec::new());
         let mut body_parameters: Vec<Parameter> = parameters
@@ -349,10 +333,8 @@ impl Client {
         }
     }
 
-    /**
-     * Will execute the request and return the RawResponse
-     * Requires the target to send headers that only contain visible ascii
-     */
+    /// Will execute the request and return the RawResponse
+    /// Requires the target to send headers that only contain visible ascii
     pub fn execute_raw(self) -> Result<RawResponse> {
         let mut easy = Easy::new();
         self.execute_on(&mut easy)
@@ -443,21 +425,17 @@ impl Client {
         })
     }
 
-    /**
-     * Executes the request and consumes the client as the headers and parameters are consumed by the request
-     */
+    /// Executes the request and consumes the client as the headers and parameters are consumed by the request
     pub fn execute(self) -> Result<ParsedResponse> {
         let raw = self.execute_raw()?;
 
         raw.parse_response()
     }
 
-    /**
-     * called when only a single simple body parameter or a single complex parameter is passed to the client (after transforming simple parameters into query parameters for GET calls)
-     * If a simple parameter is provided, its name and value (if set) have to be url encoded
-     *
-     * This will also set the corresponding content headers, if none was set
-     */
+    /// called when only a single simple body parameter or a single complex parameter is passed to the client (after transforming simple parameters into query parameters for GET calls)
+    /// If a simple parameter is provided, its name and value (if set) have to be url encoded
+    ///
+    /// This will also set the corresponding content headers, if none was set
     fn construct_singular_body(
         &mut self,
         parameter: Parameter,
@@ -549,10 +527,8 @@ fn generate_base_url(url_str: &str) -> Result<(Url, Vec<Parameter>)> {
     }
 }
 
-/**
- * Parses the query string (the section after <base-url>?)
- * Will not URL encode it
- */
+/// Parses the query string (the section after <base-url>?)
+/// Will not URL encode it
 fn parse_query_string(query: &str) -> Vec<Parameter> {
     query
         .split("&")
@@ -654,9 +630,7 @@ fn process_header_line(line: &[u8], headers: &mut HeaderMap) -> Result<()> {
     Ok(())
 }
 
-/**
- * Will be lossy if a header has multiple values.
- */
+/// Will be lossy if a header has multiple values.
 pub fn header_map_to_hash_map(headers: &HeaderMap) -> Result<HashMap<String, String>> {
     let mut header_map = HashMap::with_capacity(headers.keys_len());
     for (name, value) in headers.into_iter() {
@@ -676,11 +650,9 @@ impl RawResponse {
     }
 }
 
-/**
- * Parses the response with their corresponding headers and body
- * For non-multipart responses this will terminate after one method invocation
- * For multipart responses this is called recursive for each part.
- */
+/// Parses the response with their corresponding headers and body
+/// For non-multipart responses this will terminate after one method invocation
+/// For multipart responses this is called recursive for each part.
 fn parse_part(headers: Headers, body: &[u8]) -> Result<Vec<Parameter>> {
     let (name, content_type) = get_name_and_content_type(&headers)?;
     // We use essence_str to remove any attached parameters for this comparison
@@ -728,9 +700,7 @@ fn get_name_and_content_type(headers: &Headers) -> Result<(String, Mime)> {
     Ok((name, content_type))
 }
 
-/**
- * Parses content into a single complex parameter
- */
+/// Parses content into a single complex parameter
 fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<Parameter>> {
     let mut content = tempfile::tempfile()?;
     content.write(&body)?;
@@ -742,9 +712,7 @@ fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<P
     }])
 }
 
-/**
- * Parses content into list of simple parameters (& separated sequence)
- */
+/// Parses content into list of simple parameters (& separated sequence)
 fn parse_form_urlencoded(body: &[u8]) -> Result<Vec<Parameter>> {
     let mut parameters = Vec::new();
     form_urlencoded::parse(&body).for_each(|pair| {
@@ -1240,9 +1208,7 @@ mod testing {
         }
     }
 
-    /**
-     * Copies bytes from the 16x16.jpg from the multipart directly into a new file to check for correctness
-     */
+    /// Copies bytes from the 16x16.jpg from the multipart directly into a new file to check for correctness
     fn _copy_result() -> Result<()> {
         let test_file = "./scripts/output-multipart-mixed.txt";
         let mut file = fs::File::open(test_file)?;
