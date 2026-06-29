@@ -551,9 +551,7 @@ fn construct_multipart(parameters: Vec<Parameter>) -> Result<RequestBody> {
     for parameter in parameters {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
-                // For now, in multipart, we do not url encode the names and values
-                let name = urlencoding::decode(&name).unwrap().into_owned();
-                let value = urlencoding::decode(&value).unwrap().into_owned();
+                // names/values are stored raw; multipart field parts are not percent-encoded
                 parts.push(MultipartPart {
                     name,
                     data: value.into_bytes(),
