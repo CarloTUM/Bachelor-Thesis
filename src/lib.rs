@@ -1,8 +1,7 @@
 use bytes::{Buf, Bytes};
 use curl::easy::{Easy, Form, List};
-use derive_more::From;
 use multipart::server::{FieldHeaders, ReadEntry};
-use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue, ToStrError};
+use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use url::Url;
 use serde::Serialize;
 use tempfile::tempfile;
@@ -14,6 +13,11 @@ use std::{
 pub use mime::*;
 
 use urlencoding::encode;
+
+mod error;
+
+pub use error::Error;
+use error::Result;
 
 #[derive(Debug, Clone, Serialize)]
 pub enum ParameterType {
@@ -133,22 +137,6 @@ impl  Debug for Client {
             .finish()
     }
 }
-
-#[derive(From, Debug)]
-pub enum Error {
-    CurlError(curl::Error),
-    CurlFormError(curl::FormError),
-    InvalidHeaderName(http::header::InvalidHeaderName),
-    InvalidHeaderValue(http::header::InvalidHeaderValue),
-    UrlParserError(url::ParseError),
-    FileError(std::io::Error),
-    ToStringError(ToStrError),
-    HeaderParseError(String),
-    MimeParseError(FromStrError),
-    Utf8Error(std::str::Utf8Error),
-}
-
-type Result<T> = std::result::Result<T, Error>;
 
 /// Executes HTTP requests:
 ///
