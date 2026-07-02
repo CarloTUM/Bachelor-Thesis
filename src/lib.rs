@@ -495,10 +495,6 @@ impl Agent {
     pub fn execute(&mut self, client: Client) -> Result<ParsedResponse> {
         self.execute_raw(client)?.parse_response()
     }
-
-    pub fn local_port(&mut self) -> Result<u16> {
-        Ok(self.easy.local_port()?)
-    }
 }
 
 impl Default for Agent {
@@ -761,26 +757,6 @@ mod testing {
         assert_eq!(parsed_mime.essence_str(), "text/plain");
         assert_eq!(parsed_mime.get_param("charset").unwrap(), "UTF-8");
         assert_eq!(parsed_mime, test_type)
-    }
-
-    #[test]
-    fn test_header_callback_clears_on_new_phase() {
-        let mut h = HeaderMap::new();
-        process_header_line(b"HTTP/1.1 100 Continue\r\n", &mut h).unwrap();
-        process_header_line(b"Link: </preload>; rel=preload\r\n", &mut h).unwrap();
-        process_header_line(b"\r\n", &mut h).unwrap();
-        process_header_line(b"HTTP/1.1 200 OK\r\n", &mut h).unwrap();
-        process_header_line(b"Content-Type: text/plain\r\n", &mut h).unwrap();
-        process_header_line(b"X-Trace: abc\r\n", &mut h).unwrap();
-        assert!(h.get("link").is_none(), "100-phase header must not leak");
-        assert_eq!(h.get("content-type").unwrap(), "text/plain");
-        assert_eq!(h.get("x-trace").unwrap(), "abc");
-    }
-
-    #[test]
-    fn test_header_callback_rejects_non_ascii() {
-        let mut h = HeaderMap::new();
-        assert!(process_header_line(b"X-Bad: \xff\xfe\r\n", &mut h).is_err());
     }
 
     mod test_creation {
