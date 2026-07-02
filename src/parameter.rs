@@ -68,3 +68,17 @@ impl Into<ParameterDTO> for Parameter {
         }
     }
 }
+
+#[cfg(test)]
+mod testing {
+    use super::*;
+
+    #[test]
+    fn test_mime_parsing() {
+        let test_type = "text/plain;charset=UTF-8";
+        let parsed_mime = test_type.parse::<Mime>().unwrap();
+        assert_eq!(parsed_mime.essence_str(), "text/plain");
+        assert_eq!(parsed_mime.get_param("charset").unwrap(), "UTF-8");
+        assert_eq!(parsed_mime, test_type)
+    }
+}
