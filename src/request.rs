@@ -7,7 +7,7 @@ use url::Url;
 use urlencoding::encode;
 
 use std::{
-    collections::HashMap, fmt::Debug, io::{Read, Seek, Write}, str::FromStr, sync::MutexGuard, time::Duration
+    collections::HashMap, cell::RefCell, fmt::Debug, io::{Read, Seek, Write}, str::FromStr, time::Duration
 };
 
 use crate::error::{Error, Result};
@@ -47,6 +47,13 @@ impl  Debug for Client {
             .field("form_url_encoded", &self.form_url_encoded)
             .finish()
     }
+}
+
+thread_local! {
+    /// One libcurl handle per thread, reused across requests. `reset()` clears
+    /// the previous request's options but keeps libcurl's live connection cache,
+    /// so repeat calls to the same host skip the TCP/TLS handshake.
+    static HANDLE: RefCell<Easy> = RefCell::new(Easy::new());
 }
 
 /// Executes HTTP requests:
@@ -229,9 +236,15 @@ impl Client {
 
     /// Will execute the request and return the RawResponse
     /// Requires the target to send headers that only contain visible ascii
+    ///
+    /// Reuses a thread-local libcurl handle so connections to the same host stay
+    /// alive across calls. The handle is reset() before each request to drop the
+    /// previous request's options while keeping the live connection cache.
     pub fn execute_raw(self) -> Result<RawResponse> {
-        let mut easy = Easy::new();
-        self.execute_on(&mut easy)
+        HANDLE.with_borrow_mut(|easy| {
+            easy.reset();
+            self.execute_on(easy)
+        })
     }
 
     fn execute_on(mut self, easy: &mut Easy) -> Result<RawResponse> {
@@ -371,34 +384,6 @@ impl Client {
                 })
             }
         }
-    }
-}
-
-/// Keeps one curl Easy handle around and reuses it, so we don't redo the
-/// TCP/TLS handshake on every call to the same host. Each request reset()s
-/// the handle to drop the old options but keep the live connection.
-pub struct Agent {
-    easy: Easy,
-}
-
-impl Agent {
-    pub fn new() -> Agent {
-        Agent { easy: Easy::new() }
-    }
-
-    pub fn execute_raw(&mut self, client: Client) -> Result<RawResponse> {
-        self.easy.reset();
-        client.execute_on(&mut self.easy)
-    }
-
-    pub fn execute(&mut self, client: Client) -> Result<ParsedResponse> {
-        self.execute_raw(client)?.parse_response()
-    }
-}
-
-impl Default for Agent {
-    fn default() -> Self {
-        Agent::new()
     }
 }
 
