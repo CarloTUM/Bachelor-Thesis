@@ -101,7 +101,7 @@ fn get_name_and_content_type(headers: &Headers) -> Result<(String, Mime)> {
 /// Parses content into a single complex parameter
 fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<Parameter>> {
     let mut content = tempfile::tempfile()?;
-    content.write(&body)?;
+    content.write_all(body)?;
     content.rewind()?;
     Ok(vec![Parameter::ComplexParameter {
         name: name.to_owned(),
