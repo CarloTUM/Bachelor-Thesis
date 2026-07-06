@@ -78,7 +78,7 @@ fn get_name_and_content_type(headers: &Headers) -> Result<(String, Mime)> {
         Headers::PartHeaders(headers) => {
             // Get arc as ref
             let mut name = &*headers.name;
-            if name.len() == 0 {
+            if name.is_empty() {
                 name = "result";
             }
             name.to_owned()
@@ -113,7 +113,7 @@ fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<P
 /// Parses content into list of simple parameters (& separated sequence)
 fn parse_form_urlencoded(body: &[u8]) -> Result<Vec<Parameter>> {
     let mut parameters = Vec::new();
-    form_urlencoded::parse(&body).for_each(|pair| {
+    form_urlencoded::parse(body).for_each(|pair| {
         // UTF 8 per standard: https://url.spec.whatwg.org/#urlencoded-parsing
         parameters.push(Parameter::SimpleParameter {
             name: (*pair.0).to_owned(),

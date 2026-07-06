@@ -181,22 +181,19 @@ impl Client {
         let mut query_params = Vec::new();
         self.parameters
             .iter()
-            .for_each(|parameter| match parameter {
-                Parameter::SimpleParameter {
+            .for_each(|parameter| if let Parameter::SimpleParameter {
                     name,
                     value,
                     param_type,
-                } => {
-                    let is_query_param = matches!(param_type, ParameterType::Query);
-                    if is_query_param {
-                        if value.len() == 0 {
-                            query_params.push(encode(name).into_owned());
-                        } else {
-                            query_params.push(format!("{}={}", encode(name), encode(value)));
-                        };
-                    }
+                } = parameter {
+                let is_query_param = matches!(param_type, ParameterType::Query);
+                if is_query_param {
+                    if value.is_empty() {
+                        query_params.push(encode(name).into_owned());
+                    } else {
+                        query_params.push(format!("{}={}", encode(name), encode(value)));
+                    };
                 }
-                _ => (),
             });
         let query_string = query_params.join("&");
         let url = if query_string.is_empty() {
@@ -211,7 +208,7 @@ impl Client {
     /// Given the parameters/method the body and relevant headers are adjusted
     /// After this method, the parameters field is left as an empty vector
     fn generate_body(&mut self) -> Result<RequestBody> {
-        let parameters: Vec<Parameter> = std::mem::replace(&mut self.parameters, Vec::new());
+        let parameters: Vec<Parameter> = std::mem::take(&mut self.parameters);
         let mut body_parameters: Vec<Parameter> = parameters
             .into_iter()
             .filter(|parameter| match parameter {
@@ -349,7 +346,7 @@ impl Client {
     ) -> Result<RequestBody> {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
-                let text = if value.len() == 0 {
+                let text = if value.is_empty() {
                     encode(&name).into_owned()
                 } else {
                     format!("{}={}", encode(&name), encode(&value))
@@ -463,7 +460,7 @@ fn construct_form_url_encoded(parameters: Vec<Parameter>) -> Result<RequestBody>
     for parameter in parameters {
         match parameter {
             Parameter::SimpleParameter { name, value, .. } => {
-                if value.len() == 0 {
+                if value.is_empty() {
                     params.push(encode(&name).into_owned());
                 } else {
                     params.push(format!("{}={}", encode(&name), encode(&value)));
