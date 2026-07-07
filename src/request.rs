@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use curl::easy::{Easy, Form, List};
 use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use mime::Mime;
@@ -24,7 +25,7 @@ pub struct Client {
 
 enum RequestBody {
     Raw {
-        data: Vec<u8>,
+        data: Bytes,
         content_type: Option<String>,
     },
     FormUrlEncoded(String),
@@ -33,7 +34,7 @@ enum RequestBody {
 
 struct MultipartPart {
     name: String,
-    data: Vec<u8>,
+    data: Bytes,
     mime_type: Option<String>,
 }
 
@@ -129,7 +130,7 @@ impl Client {
         self.add_parameter(Parameter::ComplexParameter {
             name: name.to_owned(),
             mime_type,
-            content: data.to_vec(),
+            content: Bytes::copy_from_slice(data),
         });
         Ok(())
     }
@@ -352,7 +353,7 @@ impl Client {
                     Some(mime::APPLICATION_WWW_FORM_URLENCODED.to_string())
                 };
                 Ok(RequestBody::Raw {
-                    data: text.into_bytes(),
+                    data: text.into_bytes().into(),
                     content_type,
                 })
             }
@@ -422,7 +423,7 @@ fn construct_multipart(parameters: Vec<Parameter>) -> Result<RequestBody> {
                 // names/values are stored raw; multipart field parts are not percent-encoded
                 parts.push(MultipartPart {
                     name,
-                    data: value.into_bytes(),
+                    data: value.into_bytes().into(),
                     mime_type: None,
                 });
             }
@@ -563,7 +564,7 @@ mod test_creation {
                     content_type.as_deref(),
                     Some(APPLICATION_WWW_FORM_URLENCODED.as_ref())
                 );
-                assert_eq!(data, b"simple_param_%20test=simple_value");
+                assert_eq!(data, b"simple_param_%20test=simple_value".as_slice());
             }
             _ => panic!("expected RequestBody::Raw"),
         }
@@ -574,7 +575,7 @@ mod test_creation {
     fn test_building_singular_complex_text_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let content = fs::read("./test_files/text/file_example.xml")?;
+        let content = fs::read("./test_files/text/file_example.xml")?.into();
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
@@ -594,7 +595,7 @@ mod test_creation {
     fn test_building_singular_complex_binary_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let content = fs::read("./test_files/binary/16x16.jpg")?;
+        let content = fs::read("./test_files/binary/16x16.jpg")?.into();
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
@@ -646,14 +647,14 @@ mod test_creation {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
 
-        let content = fs::read("./test_files/binary/16x16.jpg")?;
+        let content = fs::read("./test_files/binary/16x16.jpg")?.into();
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_jpg".to_owned(),
             mime_type: mime::IMAGE_JPEG,
             content,
         });
 
-        let content = fs::read("./test_files/text/file_example.xml")?;
+        let content = fs::read("./test_files/text/file_example.xml")?.into();
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_xml".to_owned(),
             mime_type: mime::TEXT_XML,
@@ -675,7 +676,7 @@ mod test_creation {
                 assert_eq!(parts[1].mime_type.as_deref(), Some("text/xml"));
                 assert_eq!(parts[2].name, "test_simple");
                 assert_eq!(parts[2].mime_type, None);
-                assert_eq!(parts[2].data, b"test_value");
+                assert_eq!(parts[2].data, b"test_value".as_slice());
             }
             _ => panic!("expected RequestBody::Multipart"),
         }
@@ -729,7 +730,7 @@ mod test_parsing {
             Parameter::ComplexParameter {
                 name: "a".to_owned(),
                 mime_type: TEXT_PLAIN,
-                content: Vec::new(),
+                content: Bytes::new(),
             },
         ]);
         match client.generate_body().unwrap() {

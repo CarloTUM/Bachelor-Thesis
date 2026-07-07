@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use mime::Mime;
 use serde::Serialize;
 
@@ -24,7 +25,9 @@ pub enum Parameter {
         name: String,
         //  If no charset is specified, the default is ASCII (US-ASCII) unless overridden by the user agent's settings (https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types)
         mime_type: Mime,
-        content: Vec<u8>,
+        // Bytes instead of Vec<u8> so parsed responses can share the buffer
+        // with ParsedResponse.raw instead of holding a second copy
+        content: Bytes,
     },
 }
 

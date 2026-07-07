@@ -41,7 +41,9 @@ impl RawResponse {
     pub(crate) fn parse_response(self) -> Result<ParsedResponse> {
         Ok(ParsedResponse {
             headers: header_map_to_hash_map(&self.headers)?,
-            content: parse_part(Headers::HeaderMap(self.headers), &self.body)?,
+            // Bytes::clone is only a refcount bump; for flat responses the
+            // parsed parameter then shares this buffer with `raw`
+            content: parse_part(Headers::HeaderMap(self.headers), self.body.clone())?,
             status_code: self.status_code,
             raw: self.body,
         })
@@ -51,7 +53,7 @@ impl RawResponse {
 /// Parses the response with their corresponding headers and body
 /// For non-multipart responses this will terminate after one method invocation
 /// For multipart responses this is called recursive for each part.
-fn parse_part(headers: Headers, body: &[u8]) -> Result<Vec<Parameter>> {
+fn parse_part(headers: Headers, body: Bytes) -> Result<Vec<Parameter>> {
     let (name, content_type) = get_name_and_content_type(&headers)?;
     // We use essence_str to remove any attached parameters for this comparison
     if content_type.type_() == mime::MULTIPART {
@@ -61,9 +63,9 @@ fn parse_part(headers: Headers, body: &[u8]) -> Result<Vec<Parameter>> {
                 "Content type multipart misses boundary parameter".to_owned(),
             ))?
             .to_string();
-        parse_multipart(body, &boundary)
+        parse_multipart(&body, &boundary)
     } else if content_type.essence_str() == mime::APPLICATION_WWW_FORM_URLENCODED {
-        parse_form_urlencoded(body)
+        parse_form_urlencoded(&body)
     } else {
         parse_flat_data(&content_type, body, &name)
     }
@@ -99,11 +101,11 @@ fn get_name_and_content_type(headers: &Headers) -> Result<(String, Mime)> {
 }
 
 /// Parses content into a single complex parameter
-fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<Parameter>> {
+fn parse_flat_data(content_type: &Mime, body: Bytes, name: &str) -> Result<Vec<Parameter>> {
     Ok(vec![Parameter::ComplexParameter {
         name: name.to_owned(),
         mime_type: content_type.clone(),
-        content: body.to_vec(),
+        content: body,
     }])
 }
 
@@ -130,7 +132,8 @@ fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<Parameter>> {
             multipart::server::ReadEntryResult::Entry(mut entry) => {
                 let mut body: Vec<u8> = Vec::new();
                 entry.data.read_to_end(&mut body)?;
-                parameters.extend(parse_part(Headers::PartHeaders(entry.headers), &body)?)
+                // Bytes::from(Vec) takes ownership without copying
+                parameters.extend(parse_part(Headers::PartHeaders(entry.headers), body.into())?)
             }
             multipart::server::ReadEntryResult::End(_) => return Ok(parameters),
             multipart::server::ReadEntryResult::Error(_, error) => {
@@ -156,7 +159,7 @@ mod test_parsing {
             parse_headers_from_file("./test_files/http/headers/simple_singular_headers.txt")?;
         println!("Headers: {:?}", headers);
         let body = fs::read("./test_files/http/bodies/simple_singular_body.txt")?;
-        let mut result = parse_part(Headers::HeaderMap(headers), &body)?;
+        let mut result = parse_part(Headers::HeaderMap(headers), body.into())?;
         assert_eq!(result.len(), 1);
         let result = result.pop().unwrap();
         match result {
@@ -181,7 +184,7 @@ mod test_parsing {
         )?;
         println!("Headers: {:?}", headers);
         let body = fs::read("./test_files/http/bodies/text_file_singular_body.txt")?;
-        let mut result = parse_part(Headers::HeaderMap(headers), &body)?;
+        let mut result = parse_part(Headers::HeaderMap(headers), body.clone().into())?;
         println!("{:?}", result);
         match result.pop().unwrap() {
             Parameter::SimpleParameter { .. } => panic!("Should not happen"),
@@ -202,7 +205,7 @@ mod test_parsing {
         let headers =
             parse_headers_from_file("./test_files/http/headers/jpg_file_singular_headers.txt")?;
         let body = fs::read("./test_files/http/bodies/jpg_file_singular_body.txt")?;
-        let mut result = parse_part(Headers::HeaderMap(headers), &body)?;
+        let mut result = parse_part(Headers::HeaderMap(headers), body.clone().into())?;
         match result.pop().unwrap() {
             Parameter::SimpleParameter { .. } => panic!("Should not happen"),
             Parameter::ComplexParameter {
@@ -225,7 +228,7 @@ mod test_parsing {
             parse_headers_from_file("./test_files/http/headers/text_multipart_headers.txt")?;
         println!("Headers: {:?}", headers);
         let body = fs::read("./test_files/http/bodies/text_multipart_body.txt")?;
-        let result = parse_part(Headers::HeaderMap(headers), &body)?;
+        let result = parse_part(Headers::HeaderMap(headers), body.into())?;
         assert_eq!(result.len(), 3);
         for (index, parameter) in result.into_iter().enumerate() {
             println!("Checking parameter {}", index);
@@ -253,7 +256,7 @@ mod test_parsing {
             parse_headers_from_file("./test_files/http/headers/mixed_multipart_headers.txt")?;
         println!("Headers: {:?}", headers);
         let body = fs::read("./test_files/http/bodies/mixed_multipart_body.txt")?;
-        let mut result = parse_part(Headers::HeaderMap(headers), &body)?;
+        let mut result = parse_part(Headers::HeaderMap(headers), body.into())?;
         assert_eq!(result.len(), 3);
         result.iter().for_each(|parameter| {
             assert!(matches!(parameter, Parameter::ComplexParameter { .. }))
