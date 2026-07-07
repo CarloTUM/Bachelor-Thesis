@@ -2,12 +2,11 @@ use curl::easy::{Easy, Form, List};
 use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use mime::Mime;
 use serde::Serialize;
-use tempfile::tempfile;
 use url::Url;
 use urlencoding::encode;
 
 use std::{
-    collections::HashMap, cell::RefCell, fmt::Debug, io::{Read, Seek, Write}, str::FromStr, time::Duration
+    collections::HashMap, cell::RefCell, fmt::Debug, str::FromStr, time::Duration
 };
 
 use crate::error::{Error, Result};
@@ -105,36 +104,32 @@ impl Client {
             Parameter::ComplexParameter {
                 name,
                 mime_type,
-                content_handle,
+                content,
             } => {
                 // If we add a complex parameter, we no longer can send the request as form url encoded
                 self.form_url_encoded = false;
                 Parameter::ComplexParameter {
                     name,
                     mime_type,
-                    content_handle,
+                    content,
                 }
             }
         };
         self.parameters.push(parameter);
     }
 
-    /// Will add a complex (file-backed) parameter to the client parameters for the request
-    /// The provided bytes are written to a temporary file used as the content handle
+    /// Will add a complex parameter to the client parameters for the request
+    /// The provided bytes are stored in memory
     pub fn add_complex_parameter(
         &mut self,
         name: &str,
         mime_type: Mime,
         data: &[u8],
     ) -> Result<()> {
-        let mut file = tempfile()?;
-        file.write_all(data)?;
-        file.rewind()?;
-
         self.add_parameter(Parameter::ComplexParameter {
             name: name.to_owned(),
             mime_type,
-            content_handle: file,
+            content: data.to_vec(),
         });
         Ok(())
     }
@@ -363,13 +358,9 @@ impl Client {
             }
             Parameter::ComplexParameter {
                 mime_type,
-                mut content_handle,
+                content,
                 ..
             } => {
-                // We read out the content handle, otherwise we could stream in the file read (better) but then it would use transfer-encoding chunked -> currently not supported
-                let mut content = Vec::new();
-                content_handle.rewind()?;
-                content_handle.read_to_end(&mut content)?;
                 let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
                     None
                 } else {
@@ -438,12 +429,8 @@ fn construct_multipart(parameters: Vec<Parameter>) -> Result<RequestBody> {
             Parameter::ComplexParameter {
                 name,
                 mime_type,
-                mut content_handle,
+                content,
             } => {
-                let mut content = Vec::new();
-                // We read out the content handle, otherwise we could stream in the file read (better) but then it would use transfer-encoding chunked -> currently not supported
-                content_handle.rewind()?;
-                content_handle.read_to_end(&mut content)?;
                 parts.push(MultipartPart {
                     name,
                     data: content,
@@ -587,13 +574,12 @@ mod test_creation {
     fn test_building_singular_complex_text_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let file = "./test_files/text/file_example.xml";
-        let file = fs::File::open(file)?;
+        let content = fs::read("./test_files/text/file_example.xml")?;
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
             mime_type: mime::TEXT_XML,
-            content_handle: file,
+            content,
         });
         match client.generate_body()? {
             RequestBody::Raw { content_type, .. } => {
@@ -608,13 +594,12 @@ mod test_creation {
     fn test_building_singular_complex_binary_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let test_file = "./test_files/binary/16x16.jpg";
-        let file = fs::File::open(test_file)?;
+        let content = fs::read("./test_files/binary/16x16.jpg")?;
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
             mime_type: mime::IMAGE_JPEG,
-            content_handle: file,
+            content,
         });
         match client.generate_body()? {
             RequestBody::Raw { content_type, .. } => {
@@ -661,20 +646,18 @@ mod test_creation {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
 
-        let test_file = "./test_files/binary/16x16.jpg";
-        let file = fs::File::open(test_file)?;
+        let content = fs::read("./test_files/binary/16x16.jpg")?;
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_jpg".to_owned(),
             mime_type: mime::IMAGE_JPEG,
-            content_handle: file,
+            content,
         });
 
-        let test_file = "./test_files/text/file_example.xml";
-        let file = fs::File::open(test_file)?;
+        let content = fs::read("./test_files/text/file_example.xml")?;
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_xml".to_owned(),
             mime_type: mime::TEXT_XML,
-            content_handle: file,
+            content,
         });
 
         client.add_parameter(Parameter::SimpleParameter {
@@ -746,7 +729,7 @@ mod test_parsing {
             Parameter::ComplexParameter {
                 name: "a".to_owned(),
                 mime_type: TEXT_PLAIN,
-                content_handle: tempfile::tempfile().unwrap(),
+                content: Vec::new(),
             },
         ]);
         match client.generate_body().unwrap() {

@@ -4,7 +4,7 @@ use mime::{APPLICATION_OCTET_STREAM, BOUNDARY, Mime};
 use multipart::server::{FieldHeaders, ReadEntry};
 
 use std::{
-    collections::HashMap, io::{Read, Seek, Write}, str::FromStr
+    collections::HashMap, io::Read, str::FromStr
 };
 
 use crate::error::{Error, Result};
@@ -100,13 +100,10 @@ fn get_name_and_content_type(headers: &Headers) -> Result<(String, Mime)> {
 
 /// Parses content into a single complex parameter
 fn parse_flat_data(content_type: &Mime, body: &[u8], name: &str) -> Result<Vec<Parameter>> {
-    let mut content = tempfile::tempfile()?;
-    content.write_all(body)?;
-    content.rewind()?;
     Ok(vec![Parameter::ComplexParameter {
         name: name.to_owned(),
         mime_type: content_type.clone(),
-        content_handle: content,
+        content: body.to_vec(),
     }])
 }
 
@@ -189,14 +186,11 @@ mod test_parsing {
         match result.pop().unwrap() {
             Parameter::SimpleParameter { .. } => panic!("Should not happen"),
             Parameter::ComplexParameter {
-                mut content_handle,
+                content,
                 mime_type,
                 ..
             } => {
-                println!("{:?}", content_handle);
-                let mut buffer = Vec::new();
-                content_handle.read_to_end(&mut buffer)?;
-                assert_eq!(body, buffer);
+                assert_eq!(body, content);
                 assert_eq!(mime_type.get_param("charset").unwrap(), "utf-8");
             }
         };
@@ -214,15 +208,12 @@ mod test_parsing {
             Parameter::ComplexParameter {
                 name,
                 mime_type,
-                mut content_handle,
+                content,
             } => {
                 // Test custom name via content-id header:
                 assert_eq!(name, "moon.jpg");
                 assert_eq!(mime_type, APPLICATION_OCTET_STREAM);
-                let mut buffer = Vec::new();
-                content_handle.read_to_end(&mut buffer)?;
-                assert_eq!(body, buffer);
-                // Using custom name:
+                assert_eq!(body, content);
             }
         };
         Ok(())
@@ -243,14 +234,12 @@ mod test_parsing {
                 Parameter::ComplexParameter {
                     name,
                     mime_type,
-                    mut content_handle,
+                    content,
                 } => {
                     assert_eq!(mime_type, TEXT_PLAIN_UTF_8);
                     assert_eq!(name, format!("simple_param_{}test", index));
 
-                    let mut content = String::new();
-                    content_handle.read_to_string(&mut content)?;
-                    assert_eq!(content, format!("simple_value{}", index));
+                    assert_eq!(content, format!("simple_value{}", index).into_bytes());
                 }
             }
         }
@@ -287,16 +276,12 @@ mod test_parsing {
                 Parameter::ComplexParameter {
                     name,
                     mime_type,
-                    content_handle,
+                    content,
                 } => {
                     assert_eq!(name, expected_names[index]);
                     assert_eq!(mime_type.to_string(), expected_mime_types[index]);
 
-                    let mut content = Vec::new();
-                    content_handle
-                        .read_to_end(&mut content)
-                        .expect("Error reading parameter content");
-                    assert_eq!(content, expected_content[index]);
+                    assert_eq!(*content, expected_content[index]);
                 }
             });
 

@@ -1,8 +1,6 @@
 use mime::Mime;
 use serde::Serialize;
 
-use std::fs;
-
 #[derive(Debug, Clone, Serialize)]
 pub enum ParameterType {
     Query,
@@ -21,13 +19,12 @@ pub enum Parameter {
         param_type: ParameterType,
     },
 
-    // Since File is not cloneable, we do not merge simple and complex parameters into an enum
     // For sending/receiving files
     ComplexParameter {
         name: String,
         //  If no charset is specified, the default is ASCII (US-ASCII) unless overridden by the user agent's settings (https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types)
         mime_type: Mime,
-        content_handle: fs::File,
+        content: Vec<u8>,
     },
 }
 
