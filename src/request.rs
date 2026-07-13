@@ -575,16 +575,17 @@ mod test_creation {
     fn test_building_singular_complex_text_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let content = fs::read("./test_files/text/file_example.xml")?.into();
+        let content: Bytes = fs::read("./test_files/text/file_example.xml")?.into();
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
             mime_type: mime::TEXT_XML,
-            content,
+            content: content.clone(),
         });
         match client.generate_body()? {
-            RequestBody::Raw { content_type, .. } => {
+            RequestBody::Raw { data, content_type } => {
                 assert_eq!(content_type.as_deref(), Some("text/xml"));
+                assert_eq!(data, content);
             }
             _ => panic!("expected RequestBody::Raw"),
         }
@@ -595,16 +596,17 @@ mod test_creation {
     fn test_building_singular_complex_binary_body() -> Result<()> {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
-        let content = fs::read("./test_files/binary/16x16.jpg")?.into();
+        let content: Bytes = fs::read("./test_files/binary/16x16.jpg")?.into();
 
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_file".to_owned(),
             mime_type: mime::IMAGE_JPEG,
-            content,
+            content: content.clone(),
         });
         match client.generate_body()? {
-            RequestBody::Raw { content_type, .. } => {
+            RequestBody::Raw { data, content_type } => {
                 assert_eq!(content_type.as_deref(), Some("image/jpeg"));
+                assert_eq!(data, content);
             }
             _ => panic!("expected RequestBody::Raw"),
         }
@@ -647,18 +649,18 @@ mod test_creation {
         let test_url = "http://localhost:5678";
         let mut client = Client::new(test_url, Method::POST)?;
 
-        let content = fs::read("./test_files/binary/16x16.jpg")?.into();
+        let jpg_content: Bytes = fs::read("./test_files/binary/16x16.jpg")?.into();
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_jpg".to_owned(),
             mime_type: mime::IMAGE_JPEG,
-            content,
+            content: jpg_content.clone(),
         });
 
-        let content = fs::read("./test_files/text/file_example.xml")?.into();
+        let xml_content: Bytes = fs::read("./test_files/text/file_example.xml")?.into();
         client.add_parameter(Parameter::ComplexParameter {
             name: "test_xml".to_owned(),
             mime_type: mime::TEXT_XML,
-            content,
+            content: xml_content.clone(),
         });
 
         client.add_parameter(Parameter::SimpleParameter {
@@ -672,8 +674,10 @@ mod test_creation {
                 assert_eq!(parts.len(), 3);
                 assert_eq!(parts[0].name, "test_jpg");
                 assert_eq!(parts[0].mime_type.as_deref(), Some("image/jpeg"));
+                assert_eq!(parts[0].data, jpg_content);
                 assert_eq!(parts[1].name, "test_xml");
                 assert_eq!(parts[1].mime_type.as_deref(), Some("text/xml"));
+                assert_eq!(parts[1].data, xml_content);
                 assert_eq!(parts[2].name, "test_simple");
                 assert_eq!(parts[2].mime_type, None);
                 assert_eq!(parts[2].data, b"test_value".as_slice());
