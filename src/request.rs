@@ -12,7 +12,7 @@ use std::{
 
 use crate::error::{Error, Result};
 use crate::parameter::{Parameter, ParameterType};
-use crate::response::{ParsedResponse, RawResponse};
+use crate::response::{ParsedResponse, RawResponse, process_header_line};
 
 /// Abstraction on top of libcurl
 pub struct Client {
@@ -460,32 +460,6 @@ fn construct_form_url_encoded(parameters: Vec<Parameter>) -> Result<RequestBody>
         }
     }
     Ok(RequestBody::FormUrlEncoded(params.join("&")))
-}
-
-/// Processes a single header line from libcurl's header callback.
-/// Clears the HeaderMap when a new "HTTP/" status line arrives so headers from
-/// earlier phases (e.g. "100 Continue") do not bleed into the final response.
-/// Returns Err for non-UTF8 lines or header names/values that are not valid
-/// per http::header — stricter than reqwest, which surfaced this lazily at
-/// to_str(). Unobservable under the visible-ASCII precondition.
-fn process_header_line(line: &[u8], headers: &mut HeaderMap) -> Result<()> {
-    let s = std::str::from_utf8(line)
-        .map_err(|_| Error::HeaderParseError("non-utf8 header line".to_owned()))?;
-    let trimmed = s.trim_end_matches(['\r', '\n']);
-    if trimmed.is_empty() {
-        return Ok(());
-    }
-    if trimmed.starts_with("HTTP/") {
-        headers.clear();
-        return Ok(());
-    }
-    let Some((name, value)) = trimmed.split_once(':') else {
-        return Ok(());
-    };
-    let n = HeaderName::from_str(name.trim())?;
-    let v = HeaderValue::from_str(value.trim())?;
-    headers.append(n, v);
-    Ok(())
 }
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
