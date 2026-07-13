@@ -292,6 +292,17 @@ mod test_parsing {
         Ok(())
     }
 
+    /// Documents the behavior of the third-party mime parser that
+    /// get_name_and_content_type relies on
+    #[test]
+    fn test_mime_parsing() {
+        let test_type = "text/plain;charset=UTF-8";
+        let parsed_mime = test_type.parse::<Mime>().unwrap();
+        assert_eq!(parsed_mime.essence_str(), "text/plain");
+        assert_eq!(parsed_mime.get_param("charset").unwrap(), "UTF-8");
+        assert_eq!(parsed_mime, test_type)
+    }
+
     fn parse_headers_from_file(path: &str) -> Result<HeaderMap> {
         let header_string = fs::read_to_string(path)?.replace("\r", "");
 
