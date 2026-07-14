@@ -1,19 +1,28 @@
-use derive_more::From;
 use http::header::ToStrError;
 use mime::FromStrError;
 
-#[derive(From, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
-    CurlError(curl::Error),
-    CurlFormError(curl::FormError),
-    InvalidHeaderName(http::header::InvalidHeaderName),
-    InvalidHeaderValue(http::header::InvalidHeaderValue),
-    UrlParserError(url::ParseError),
-    FileError(std::io::Error),
-    ToStringError(ToStrError),
+    #[error("curl error: {0}")]
+    CurlError(#[from] curl::Error),
+    #[error("curl form error: {0}")]
+    CurlFormError(#[from] curl::FormError),
+    #[error("invalid header name: {0}")]
+    InvalidHeaderName(#[from] http::header::InvalidHeaderName),
+    #[error("invalid header value: {0}")]
+    InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
+    #[error("URL parse error: {0}")]
+    UrlParserError(#[from] url::ParseError),
+    #[error("file error: {0}")]
+    FileError(#[from] std::io::Error),
+    #[error("header value is not valid UTF-8: {0}")]
+    ToStringError(#[from] ToStrError),
+    #[error("header parse error: {0}")]
     HeaderParseError(String),
-    MimeParseError(FromStrError),
-    Utf8Error(std::str::Utf8Error),
+    #[error("MIME parse error: {0}")]
+    MimeParseError(#[from] FromStrError),
+    #[error("UTF-8 error: {0}")]
+    Utf8Error(#[from] std::str::Utf8Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
