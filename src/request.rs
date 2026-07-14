@@ -215,7 +215,7 @@ impl Client {
             })
             .collect();
         if body_parameters.len() == 1 {
-            self.construct_singular_body(body_parameters.pop().expect("Cannot fail"))
+            construct_singular_body(&self.headers, body_parameters.pop().expect("Cannot fail"))
         } else {
             // For multipart we set a multipart content type => Remove custom content type
             self.headers.remove(CONTENT_TYPE.as_str());
@@ -331,49 +331,6 @@ impl Client {
 
         raw.parse_response()
     }
-
-    /// called when only a single simple body parameter or a single complex parameter is passed to the client (after transforming simple parameters into query parameters for GET calls)
-    /// If a simple parameter is provided, its name and value (if set) have to be url encoded
-    ///
-    /// This will also set the corresponding content headers, if none was set
-    fn construct_singular_body(
-        &mut self,
-        parameter: Parameter,
-    ) -> Result<RequestBody> {
-        match parameter {
-            Parameter::SimpleParameter { name, value, .. } => {
-                let text = if value.is_empty() {
-                    encode(&name).into_owned()
-                } else {
-                    format!("{}={}", encode(&name), encode(&value))
-                };
-                let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
-                    None
-                } else {
-                    Some(mime::APPLICATION_WWW_FORM_URLENCODED.to_string())
-                };
-                Ok(RequestBody::Raw {
-                    data: text.into_bytes().into(),
-                    content_type,
-                })
-            }
-            Parameter::ComplexParameter {
-                mime_type,
-                content,
-                ..
-            } => {
-                let content_type = if self.headers.contains_key(CONTENT_TYPE.as_str()) {
-                    None
-                } else {
-                    Some(mime_type.to_string())
-                };
-                Ok(RequestBody::Raw {
-                    data: content,
-                    content_type,
-                })
-            }
-        }
-    }
 }
 
 fn generate_base_url(url_str: &str) -> Result<(Url, Vec<Parameter>)> {
@@ -413,6 +370,46 @@ fn parse_query_string(query: &str) -> Vec<Parameter> {
             }
         })
         .collect()
+}
+
+/// called when only a single simple body parameter or a single complex parameter is passed to the client (after transforming simple parameters into query parameters for GET calls)
+/// If a simple parameter is provided, its name and value (if set) have to be url encoded
+///
+/// This will also set the corresponding content headers, if none was set
+fn construct_singular_body(headers: &HeaderMap, parameter: Parameter) -> Result<RequestBody> {
+    match parameter {
+        Parameter::SimpleParameter { name, value, .. } => {
+            let text = if value.is_empty() {
+                encode(&name).into_owned()
+            } else {
+                format!("{}={}", encode(&name), encode(&value))
+            };
+            let content_type = if headers.contains_key(CONTENT_TYPE.as_str()) {
+                None
+            } else {
+                Some(mime::APPLICATION_WWW_FORM_URLENCODED.to_string())
+            };
+            Ok(RequestBody::Raw {
+                data: text.into_bytes().into(),
+                content_type,
+            })
+        }
+        Parameter::ComplexParameter {
+            mime_type,
+            content,
+            ..
+        } => {
+            let content_type = if headers.contains_key(CONTENT_TYPE.as_str()) {
+                None
+            } else {
+                Some(mime_type.to_string())
+            };
+            Ok(RequestBody::Raw {
+                data: content,
+                content_type,
+            })
+        }
+    }
 }
 
 fn construct_multipart(parameters: Vec<Parameter>) -> Result<RequestBody> {
