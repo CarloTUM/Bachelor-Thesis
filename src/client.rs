@@ -223,6 +223,8 @@ impl Client {
     /// previous request's options while keeping the live connection cache.
     pub fn execute_raw(self) -> Result<RawResponse> {
         HANDLE.with_borrow_mut(|easy| {
+            // reset() also keeps libcurl's cookie store, but the cookie engine
+            // is never enabled here, so no cookie state survives between requests
             easy.reset();
             self.execute_on(easy)
         })
