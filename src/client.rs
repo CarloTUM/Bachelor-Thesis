@@ -226,7 +226,11 @@ impl Client {
             // reset() also keeps libcurl's cookie store, but the cookie engine
             // is never enabled here, so no cookie state survives between requests
             easy.reset();
-            self.execute_on(easy)
+            let result = self.execute_on(easy);
+            // free the request's copied buffers right away instead of holding
+            // them until the thread's next request; keeps the same caches
+            easy.reset();
+            result
         })
     }
 
