@@ -1,3 +1,4 @@
+pub use bytes::Bytes;
 pub use mime::*;
 
 mod client;
