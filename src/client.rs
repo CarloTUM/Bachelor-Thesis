@@ -196,6 +196,9 @@ impl Client {
             // is never enabled here, so no cookie state survives between requests
             easy.reset();
             let result = self.execute_on(easy);
+            // reset() does not free libcurl's multipart copies (the form chain
+            // and its internal mime conversion); setting an empty form does
+            let _ = easy.httppost(Form::new());
             // free the request's copied buffers right away instead of holding
             // them until the thread's next request; keeps the same caches
             easy.reset();
