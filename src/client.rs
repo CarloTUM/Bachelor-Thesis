@@ -301,6 +301,9 @@ impl Client {
             return Err(e);
         }
         perform_result?;
+        // same as the multipart parts: return growth overshoot before the
+        // buffer is frozen into Bytes for the response's lifetime
+        response_body.shrink_to_fit();
 
         Ok(RawResponse {
             headers: response_headers,
