@@ -289,8 +289,9 @@ impl Client {
                         header_err = Some(e);
                     }
                 }
-                // false aborts the transfer: no point downloading a body that
-                // would be thrown away because of the header error
+                // returning false aborts the transfer, which kills the
+                // keep-alive connection but spares us downloading a body
+                // we would throw away anyway
                 header_err.is_none()
             })?;
             transfer.perform()
