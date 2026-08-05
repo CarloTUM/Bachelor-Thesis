@@ -171,6 +171,15 @@ impl Client {
                 Parameter::ComplexParameter { .. } => true,
             })
             .collect();
+        if body_parameters.is_empty() {
+            // No body: leave the headers alone. Without this, bodyless requests
+            // (every plain GET) would lose a user-set Content-Type and be sent
+            // with an empty form-urlencoded POST body instead
+            return Ok(RequestBody::Raw {
+                data: Bytes::new(),
+                content_type: None,
+            });
+        }
         if body_parameters.len() == 1 {
             construct_singular_body(&self.headers, body_parameters.pop().expect("Cannot fail"))
         } else {
@@ -232,6 +241,10 @@ impl Client {
                 }
                 if !data.is_empty() {
                     easy.post_fields_copy(&data)?;
+                } else if matches!(self.method, Method::POST | Method::PUT | Method::PATCH) {
+                    // bodyless POST/PUT/PATCH keep an explicit Content-Length: 0,
+                    // which strict servers require
+                    easy.post_fields_copy(b"")?;
                 }
             }
             RequestBody::FormUrlEncoded(encoded) => {
