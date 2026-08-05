@@ -158,6 +158,9 @@ fn parse_multipart(body: &[u8], boundary: &str) -> Result<Vec<Parameter>> {
             multipart::server::ReadEntryResult::Entry(mut entry) => {
                 let mut body: Vec<u8> = Vec::new();
                 entry.data.read_to_end(&mut body)?;
+                // read_to_end grows by doubling; return the overshoot before
+                // the buffer is frozen into Bytes for the response's lifetime
+                body.shrink_to_fit();
                 // Bytes::from(Vec) takes ownership without copying
                 parameters.extend(parse_part(Headers::PartHeaders(entry.headers), body.into())?)
             }
