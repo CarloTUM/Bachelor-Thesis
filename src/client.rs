@@ -68,42 +68,11 @@ impl Client {
     }
 
     /// Will add the parameter to the client parameters for the request
-    pub fn add_parameter(&mut self, mut parameter: Parameter) {
-        parameter = match parameter {
-            Parameter::SimpleParameter {
-                name,
-                value,
-                param_type,
-            } => match param_type {
-                ParameterType::Query => {
-                    Parameter::SimpleParameter {
-                        name: name.to_owned(),
-                        value: value.to_owned(),
-                        param_type,
-                    }
-                }
-                ParameterType::Body => {
-                    Parameter::SimpleParameter {
-                        name: name.to_owned(),
-                        value: value.to_owned(),
-                        param_type,
-                    }
-                }
-            },
-            Parameter::ComplexParameter {
-                name,
-                mime_type,
-                content,
-            } => {
-                // If we add a complex parameter, we no longer can send the request as form url encoded
-                self.form_url_encoded = false;
-                Parameter::ComplexParameter {
-                    name,
-                    mime_type,
-                    content,
-                }
-            }
-        };
+    pub fn add_parameter(&mut self, parameter: Parameter) {
+        if matches!(parameter, Parameter::ComplexParameter { .. }) {
+            // If we add a complex parameter, we no longer can send the request as form url encoded
+            self.form_url_encoded = false;
+        }
         self.parameters.push(parameter);
     }
 
