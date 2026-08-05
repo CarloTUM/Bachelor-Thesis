@@ -277,7 +277,7 @@ impl Client {
         let mut response_body: Vec<u8> = Vec::new();
         let mut response_headers = HeaderMap::new();
         let mut header_err: Option<Error> = None;
-        {
+        let perform_result = {
             let mut transfer = easy.transfer();
             transfer.write_function(|data| {
                 response_body.extend_from_slice(data);
@@ -289,13 +289,18 @@ impl Client {
                         header_err = Some(e);
                     }
                 }
-                true
+                // false aborts the transfer: no point downloading a body that
+                // would be thrown away because of the header error
+                header_err.is_none()
             })?;
-            transfer.perform()?;
-        }
+            transfer.perform()
+        };
+        // aborting on a header error surfaces as a curl write error, so the
+        // header error must be checked first to not be masked by it
         if let Some(e) = header_err {
             return Err(e);
         }
+        perform_result?;
 
         Ok(RawResponse {
             headers: response_headers,
