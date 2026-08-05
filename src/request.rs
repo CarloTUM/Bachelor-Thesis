@@ -25,6 +25,11 @@ pub(crate) struct MultipartPart {
 pub(crate) fn generate_base_url(url_str: &str) -> Result<(Url, Vec<Parameter>)> {
     // Remove trailing whitespace
     let url_str = url_str.trim_end();
+    // Fragments are client-side only and must never reach the server; strip
+    // before the query split so a fragment cannot end up inside a query value
+    let url_str = url_str
+        .split_once('#')
+        .map_or(url_str, |(before_fragment, _)| before_fragment);
     let split = url_str.split_once("?");
     match split {
         Some((base_url_str, query_str)) => {
