@@ -221,14 +221,17 @@ impl Client {
         easy.timeout(Duration::from_secs(20))?;
         easy.follow_location(true)?;
         easy.max_redirections(10)?;
-        easy.custom_request(match self.method {
+        let verb = match self.method {
             Method::GET => "GET",
             Method::POST => "POST",
             Method::PUT => "PUT",
             Method::HEAD => "HEAD",
             Method::DELETE => "DELETE",
             Method::PATCH => "PATCH",
-        })?;
+        };
+        if !matches!(self.method, Method::POST) {
+            easy.custom_request(verb)?;
+        }
         if matches!(self.method, Method::HEAD) {
             easy.nobody(true)?;
         }
@@ -270,7 +273,9 @@ impl Client {
 
         let mut header_list = List::new();
         for (name, value) in self.headers.iter() {
-            header_list.append(&format!("{}: {}", name.as_str(), value.to_str()?))?;
+            let value = value.to_str()?.trim();
+            let separator = if value.is_empty() { ";" } else { ": " };
+            header_list.append(&format!("{}{separator}{value}", name.as_str()))?;
         }
         easy.http_headers(header_list)?;
 
