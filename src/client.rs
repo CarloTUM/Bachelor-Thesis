@@ -24,6 +24,9 @@ pub struct Client {
     pub headers: HeaderMap,
     parameters: Vec<Parameter>,
     form_url_encoded: bool,
+    timeout: Duration,
+    follow_redirects: bool,
+    max_redirects: u32,
 }
 
 impl  Debug for Client {
@@ -33,6 +36,9 @@ impl  Debug for Client {
             .field("headers", &self.headers)
             .field("parameters", &self.parameters)
             .field("form_url_encoded", &self.form_url_encoded)
+            .field("timeout", &self.timeout)
+            .field("follow_redirects", &self.follow_redirects)
+            .field("max_redirects", &self.max_redirects)
             .finish()
     }
 }
@@ -61,6 +67,10 @@ impl Client {
             // All simple parameters are URL encoded -> If added through add_parameters
             parameters: Vec::new(),
             form_url_encoded: true,
+            // defaults, overridable via set_*
+            timeout: Duration::from_secs(20),
+            follow_redirects: true,
+            max_redirects: 10,
         };
         // Add clients via add to url encode them
         client.add_parameters(parameters);
@@ -126,6 +136,21 @@ impl Client {
             self.add_request_header(&name, &value)?;
         }
         Ok(())
+    }
+
+    /// Time limit for the whole transfer, default 20s. Zero = no limit (libcurl semantics)
+    pub fn set_timeout(&mut self, timeout: Duration) {
+        self.timeout = timeout;
+    }
+
+    /// Follow 3xx redirects automatically, default true. If off, the redirect response itself is returned
+    pub fn set_follow_redirects(&mut self, follow: bool) {
+        self.follow_redirects = follow;
+    }
+
+    /// Max redirects before the request errors, default 10
+    pub fn set_max_redirects(&mut self, max: u32) {
+        self.max_redirects = max;
     }
 
     /// Generates the complete request URL including the query parameters.
@@ -218,9 +243,9 @@ impl Client {
     fn execute_on(mut self, easy: &mut Easy) -> Result<RawResponse> {
         let url = self.generate_url();
         easy.url(url.as_str())?;
-        easy.timeout(Duration::from_secs(20))?;
-        easy.follow_location(true)?;
-        easy.max_redirections(10)?;
+        easy.timeout(self.timeout)?;
+        easy.follow_location(self.follow_redirects)?;
+        easy.max_redirections(self.max_redirects)?;
         let verb = match self.method {
             Method::GET => "GET",
             Method::POST => "POST",
