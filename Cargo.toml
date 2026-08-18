@@ -7,6 +7,11 @@ edition = "2021"
 name = "http_helper"
 path = "./src/lib.rs"
 
+[features]
+# passthrough of curl's linking features, default stays dynamic
+static-curl = ["curl/static-curl"]
+static-ssl = ["curl/static-ssl"]
+
 [dependencies]
 serde ={ version = "1.0.217", features = ["derive"]}
 multipart = {package = "multipart_ng", version = "0.18.0", default-features= false, features = ["server"]}
