@@ -119,7 +119,7 @@ impl Client {
     /// `from_bytes` to create a `HeaderValue` that includes opaque octets
     /// (128-255).
     pub fn add_request_header(&mut self, name: &str, value: &str) -> Result<()> {
-        self.headers.remove(name);
+        // HeaderMap::insert already replaces all previous values for the name
         self.headers
             .insert(HeaderName::from_str(name)?, HeaderValue::from_str(value)?);
         Ok(())

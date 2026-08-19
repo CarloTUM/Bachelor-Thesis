@@ -9,7 +9,8 @@ pub enum ParameterType {
 }
 
 // Simple kv parameters, can be in body or url
-// If a request is a get request -> All parameters into the query
+// The param_type alone decides where they go; the method does not change it
+// (a Body parameter stays in the body, even on GET)
 // The name and value do not have to be escaped yet -> Part of generate_url
 // Will always be UTF-8 encoded
 #[derive(Debug)]

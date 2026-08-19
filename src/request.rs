@@ -66,7 +66,7 @@ fn parse_query_string(query: &str) -> Vec<Parameter> {
         .collect()
 }
 
-/// called when only a single simple body parameter or a single complex parameter is passed to the client (after transforming simple parameters into query parameters for GET calls)
+/// called when only a single simple body parameter or a single complex parameter is passed to the client
 /// If a simple parameter is provided, its name and value (if set) have to be url encoded
 ///
 /// This will also set the corresponding content headers, if none was set
