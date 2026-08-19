@@ -1,12 +1,12 @@
 use bytes::Bytes;
-use curl::easy::{Easy, Form, List};
+use curl::easy::{Easy, Form, List, SeekResult};
 use http::header::{CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use mime::Mime;
 use url::Url;
 use urlencoding::encode;
 
 use std::{
-    collections::HashMap, cell::RefCell, fmt::Debug, str::FromStr, time::Duration
+    collections::HashMap, cell::{Cell, RefCell}, fmt::Debug, io::SeekFrom, str::FromStr, time::Duration
 };
 
 use crate::error::{Error, Result};
@@ -262,13 +262,15 @@ impl Client {
         }
 
         let body = self.generate_body()?;
+        // streamed via read callback below, post_fields_copy would hold a 2nd copy in libcurl
+        let mut upload_body: Option<Bytes> = None;
         match body {
             RequestBody::Raw { data, content_type } => {
                 if let Some(ct) = content_type {
                     self.headers.insert(CONTENT_TYPE, HeaderValue::from_str(&ct)?);
                 }
                 if !data.is_empty() {
-                    easy.post_fields_copy(&data)?;
+                    upload_body = Some(data);
                 } else if matches!(self.method, Method::POST | Method::PUT | Method::PATCH) {
                     // bodyless POST/PUT/PATCH keep an explicit Content-Length: 0,
                     // which strict servers require
@@ -280,7 +282,7 @@ impl Client {
                     CONTENT_TYPE,
                     HeaderValue::from_static("application/x-www-form-urlencoded"),
                 );
-                easy.post_fields_copy(encoded.as_bytes())?;
+                upload_body = Some(Bytes::from(encoded.into_bytes()));
             }
             RequestBody::Multipart(parts) => {
                 let mut form = Form::new();
@@ -295,6 +297,11 @@ impl Client {
                 easy.httppost(form)?;
             }
         }
+        if let Some(data) = &upload_body {
+            // same framing as post_fields_copy (POST + known size), verb still from custom_request
+            easy.post(true)?;
+            easy.post_field_size(data.len() as u64)?;
+        }
 
         let mut header_list = List::new();
         for (name, value) in self.headers.iter() {
@@ -307,8 +314,26 @@ impl Client {
         let mut response_body: Vec<u8> = Vec::new();
         let mut response_headers = HeaderMap::new();
         let mut header_err: Option<Error> = None;
+        let upload_pos = Cell::new(0usize);
         let perform_result = {
             let mut transfer = easy.transfer();
+            if let Some(data) = &upload_body {
+                transfer.read_function(|buf| {
+                    let pos = upload_pos.get().min(data.len());
+                    let n = (data.len() - pos).min(buf.len());
+                    buf[..n].copy_from_slice(&data[pos..pos + n]);
+                    upload_pos.set(pos + n);
+                    Ok(n)
+                })?;
+                // rewind for 307/308 and retries on dead keepalive conns, else those fail
+                transfer.seek_function(|target| match target {
+                    SeekFrom::Start(offset) if offset <= data.len() as u64 => {
+                        upload_pos.set(offset as usize);
+                        SeekResult::Ok
+                    }
+                    _ => SeekResult::Fail,
+                })?;
+            }
             transfer.write_function(|data| {
                 response_body.extend_from_slice(data);
                 Ok(data.len())
